@@ -2,9 +2,10 @@
 
 import { useEffect } from "react";
 import api from "@/lib/axios/axios";
+import { useRouter } from "next/navigation";
 
 export default function GoogleLoginButton() {
-
+const router = useRouter();
   useEffect(() => {
 
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
@@ -54,8 +55,8 @@ export default function GoogleLoginButton() {
                 );
               }
 
-              // optional redirect
-              // router.push("/dashboard");
+         
+              router.push("/");
 
             } catch (error) {
               console.error("Login error:", error);
