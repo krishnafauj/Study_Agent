@@ -10,12 +10,14 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "cors": "^2.8.6",
     "dotenv": "^17.2.4",
     "express": "^5.2.1",
     "google-auth-library": "^10.5.0",
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.1.0",
-    "mongoose": "^9.2.0"
+    "mongoose": "^9.2.0",
+    "openai": "^6.22.0"
   }
 }
