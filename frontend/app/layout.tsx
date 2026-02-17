@@ -1,11 +1,8 @@
-import type { Metadata } from "next";
-import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+import Script from "next/script";
+import "./globals.css"; // Import global CSS here so it applies to (auth) too
+import type { Metadata } from "next";
 
-import QueryProvider from "@/provider/query";
-import AuthProvider from "@/provider/AuthProvider";
-import ReduxProvider from "@/provider/provider"
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -28,25 +25,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-
-      {/* ✅ Google Script */}
-      <Script
-        src="https://accounts.google.com/gsi/client"
-        strategy="afterInteractive"
-      />
-
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-
-        <QueryProvider>
-
-          <AuthProvider>
-            <ReduxProvider>
-              {children}
-            </ReduxProvider>
-          </AuthProvider>
-
-        </QueryProvider>
-
+        {/* Google Script loads globally */}
+        <Script
+          src="https://accounts.google.com/gsi/client"
+          strategy="afterInteractive"
+        />
+        {children}
       </body>
     </html>
   );
