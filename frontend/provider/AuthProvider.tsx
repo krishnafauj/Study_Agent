@@ -17,7 +17,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     const isAuthenticated = !!(token && user);
 
     // 3. Define Route Logic
-    const isLoginPage = pathname === '/login';
+    const isLoginPage = pathname === '(auth)/login';
 
     if (isLoading) {
         // Optional: Add artificial delay or logic here if needed

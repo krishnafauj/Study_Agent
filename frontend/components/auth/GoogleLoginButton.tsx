@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import api from "@/lib/axios/axios";
+import api from "@/lib/axios/api";
 import { useRouter } from "next/navigation";
 
 export default function GoogleLoginButton() {
@@ -28,7 +28,7 @@ const router = useRouter();
 
               const googleToken = response.credential;
 
-              console.log("Google ID Token:", googleToken);
+         
 
               // ✅ Send to backend
               const res = await api.post("/api/auth", {
@@ -37,7 +37,6 @@ const router = useRouter();
 
               const data = res.data;
 
-              console.log("Backend response:", data);
 
               // ✅ STORE IMPORTANT DATA
               if (data.success) {

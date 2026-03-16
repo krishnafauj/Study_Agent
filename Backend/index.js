@@ -11,70 +11,79 @@ import connectDB from "./models/MongoConnect.js";
 import apiRoutes from "./Route/Route.js";
 
 // MCP client imports
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+// import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+// import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const app = express();
 
 console.log("🚀 Express starting...");
 
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "https://study-agent-iota.vercel.app"
+    ],
+    credentials: true
+  })
+);
+
 app.use(express.json());
 
 app.use("/api", apiRoutes);
 
-const transport = new StdioClientTransport({
-  command: "node",
-  args: ["../my-mcp-server/server.js"]
-});
+// const transport = new StdioClientTransport({
+//   command: "node",
+//   args: ["../my-mcp-server/server.js"]
+// });
 
-const mcpClient = new Client(
-  {
-    name: "express-client",
-    version: "1.0.0"
-  },
-  {
-    capabilities: {}
-  }
-);
+// const mcpClient = new Client(
+//   {
+//     name: "express-client",
+//     version: "1.0.0"
+//   },
+//   {
+//     capabilities: {}
+//   }
+// );
 
-await mcpClient.connect(transport);
+// await mcpClient.connect(transport);
 
-console.log("✅ Connected to MCP server");
+// console.log("✅ Connected to MCP server");
 
-// graceful shutdown
-process.on("SIGINT", async () => {
-  console.log("Shutting down MCP connection...");
-  await mcpClient.close();
-  process.exit(0);
-});
+// // graceful shutdown
+// process.on("SIGINT", async () => {
+//   console.log("Shutting down MCP connection...");
+//   await mcpClient.close();
+//   process.exit(0);
+// });
 // ===============================
 // TEST ROUTE
 // ===============================
 
-app.get("/test", async (req, res) => {
+// app.get("/test", async (req, res) => {
 
-  try {
+//   try {
 
-    const result = await mcpClient.request({
-      method: "tools/call",
-      params: {
-        name: "sayHello",
-        arguments: {
-          name: "Krishna"
-        }
-      }
-    });
+//     const result = await mcpClient.request({
+//       method: "tools/call",
+//       params: {
+//         name: "sayHello",
+//         arguments: {
+//           name: "Krishna"
+//         }
+//       }
+//     });
 
-    res.json(result);
+//     res.json(result);
 
-  } catch (err) {
+//   } catch (err) {
 
-    console.error("MCP error:", err);
+//     console.error("MCP error:", err);
 
-    res.status(500).json({ error: "MCP failed" });
-  }
-});
+//     res.status(500).json({ error: "MCP failed" });
+//   }
+// });
 
 
 const PORT = process.env.PORT || 4000;
