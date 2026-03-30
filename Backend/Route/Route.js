@@ -5,12 +5,16 @@ import { getChatHistory } from "./chat/chatHistoryController.js";
 import { getChatSessions, getChatTitle, updateChatTitle, deleteChat, initChat } from "./chat/chatSessionController.js";
 
 import authRoutes from "./Auth/auth.js";
+import fileRoutes from "./fileRoutes.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
-console.log("Route loaded");    
+console.log("Route loaded");
 router.use("/auth", authRoutes);
 
-console.log('auth calling')
+console.log('auth calling');
 router.use(verifyToken);
+
+// File storage endpoints (S3-backed)
+router.use(fileRoutes);
 
 // Chat streaming
 router.post("/chat-stream", chatStreamHandler);

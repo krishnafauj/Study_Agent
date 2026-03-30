@@ -127,6 +127,28 @@ router.post('/folders/:folderId/upload', upload.single('file'), async (req, res)
   }
 });
 
+// PATCH /api/documents/:id – rename document metadata
+router.patch('/documents/:id', async (req, res) => {
+  try {
+    const { fileName } = req.body;
+    if (!fileName || !fileName.trim()) {
+      return res.status(400).json({ error: 'fileName is required' });
+    }
+
+    const doc = await Document.findById(req.params.id);
+    if (!doc) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    doc.fileName = fileName.trim();
+    await doc.save();
+
+    res.json({ message: 'Document renamed', document: doc });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/documents/:id/download – get download URL
 router.get('/documents/:id/download', async (req, res) => {
   try {

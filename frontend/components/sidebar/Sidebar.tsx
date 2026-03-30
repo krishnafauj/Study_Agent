@@ -16,6 +16,7 @@ import {
   Menu,
   X,
   Loader2,
+  RefreshCw,
 } from 'lucide-react'
 
 type ChatSession = {
@@ -156,10 +157,11 @@ export default function Sidebar() {
   }
 
   const menuItems = [
-    { icon: History, label: 'Past Exam History', color: 'text-pink-400' },
-    { icon: FileText, label: 'Records', color: 'text-indigo-400' },
-    { icon: Lightbulb, label: 'Suggestions & News', color: 'text-orange-400' },
-    { icon: User, label: 'Profile Settings', color: 'text-emerald-400' },
+    { icon: History, label: 'Past Exam History', color: 'text-pink-400', path: '/history' },
+    { icon: FileText, label: 'Records', color: 'text-indigo-400', path: '/records' },
+    { icon: Lightbulb, label: 'Suggestions & News', color: 'text-orange-400', path: '/suggestions' },
+    { icon: User, label: 'Profile Settings', color: 'text-emerald-400', path: '/profile' },
+    { icon: FileText, label: 'My Files', color: 'text-cyan-400', path: '/profile/files' },
   ]
 
   return (
@@ -254,6 +256,12 @@ export default function Sidebar() {
           {menuItems.map((item, i) => (
             <button
               key={i}
+              onClick={() => {
+                if (item.path) {
+                  router.push(item.path)
+                  setMobileOpen(false)
+                }
+              }}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-900/70 transition-all ${!isExpanded ? 'justify-center' : ''}`}
             >
               <item.icon size={20} className={item.color} />
@@ -272,9 +280,19 @@ export default function Sidebar() {
         {/* CHAT HISTORY LIST */}
         <div className="flex-1 px-3 overflow-y-auto">
           {isExpanded && (
-            <p className="text-xs text-neutral-500 px-3 mb-2 uppercase tracking-wider">
-              {searchQuery ? `Results for "${searchQuery}"` : 'Your Chats'}
-            </p>
+            <div className="flex items-center justify-between px-3 mb-2">
+              <p className="text-xs text-neutral-500 uppercase tracking-wider">
+                {searchQuery ? `Results for "${searchQuery}"` : 'Your Chats'}
+              </p>
+              <button
+                onClick={fetchChats}
+                disabled={isLoadingChats}
+                className="text-neutral-500 hover:text-purple-400 transition-colors disabled:opacity-50 cursor-not-allowed hover:cursor-pointer"
+                title="Refresh chats"
+              >
+                <RefreshCw size={14} className={`${isLoadingChats ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           )}
 
           {isLoadingChats ? (
