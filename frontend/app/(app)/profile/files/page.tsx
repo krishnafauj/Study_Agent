@@ -154,60 +154,206 @@ export default function ProfileFileStoragePage() {
     }
   };
 
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      // Empty for now, can add drag-active state later
+    } else if (e.type === "dragleave") {
+      // Empty for now
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+    }
+  };
+
   const totalSize = useMemo(() => docs.reduce((sum, d) => sum + (d.fileSize || 0), 0), [docs]);
 
   return (
-    <div className="min-h-screen p-6 bg-neutral-900 text-neutral-100">
-      <div className="max-w-5xl mx-auto space-y-4">
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6">
-          <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
-            <h1 className="text-2xl font-bold">Document Storage</h1>
-            <button onClick={loadDocs} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 text-sm text-white hover:bg-slate-700">
-              <RefreshCw size={16} /> Refresh
-            </button>
-          </div>
-          <p className="text-sm text-neutral-400 mb-3">Store your PDF files in S3 through backend and manage them here.</p>
-          <div className="flex flex-wrap gap-3 items-center">
-            <input type="file" accept="application/pdf" onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)} className="text-sm" />
-            <button onClick={onUpload} disabled={!selectedFile || uploading || isLoading} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40">
-              <Upload size={16} /> {uploading ? "Uploading..." : "Upload PDF"}
-            </button>
-          </div>
-          {message && <p className="mt-2 text-sm text-yellow-300">{message}</p>}
+    <div className="min-h-screen bg-black p-4 sm:p-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2">Document Storage</h1>
+          <p className="text-gray-400">Upload and manage your PDF files securely</p>
         </div>
 
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Saved Files ({docs.length})</h2>
-            <span className="text-xs text-neutral-400">Total size: {(totalSize / (1024 * 1024)).toFixed(2)} MB</span>
+        {/* Upload Section */}
+        <div className="mb-8">
+          <div className="rounded-xl border border-gray-800 bg-gray-950 p-6 sm:p-8">
+            <h2 className="text-xl font-semibold text-white mb-4">Upload New Document</h2>
+            
+            {/* File Input Area */}
+            <div
+              onDragEnter={handleDrag}
+              onDragOver={handleDrag}
+              onDragLeave={handleDrag}
+              onDrop={handleDrop}
+              className="border-2 border-dashed border-gray-700 rounded-lg p-8 text-center hover:border-blue-500 transition-colors cursor-pointer"
+            >
+              <Upload className="mx-auto mb-3 text-gray-500" size={32} />
+              <p className="text-white font-medium mb-1">Drop your PDF here or click to select</p>
+              <p className="text-gray-500 text-sm mb-4">PDF files only, up to 100MB</p>
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+                className="hidden"
+                id="file-input"
+              />
+              <label 
+                htmlFor="file-input"
+                className="inline-block cursor-pointer"
+              >
+                <span
+                  className="inline-block px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors cursor-pointer"
+                >
+                  Select File
+                </span>
+              </label>
+            </div>
+
+            {/* Selected File Preview */}
+            {selectedFile && (
+              <div className="mt-4 p-4 bg-gray-900 rounded-lg flex items-center justify-between">
+                <div>
+                  <p className="text-white font-medium truncate">{selectedFile.name}</p>
+                  <p className="text-gray-500 text-sm">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+                <button
+                  onClick={() => setSelectedFile(null)}
+                  className="text-gray-500 hover:text-red-500 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={onUpload}
+                disabled={!selectedFile || uploading || isLoading}
+                className="flex-1 sm:flex-initial px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors inline-flex items-center justify-center gap-2"
+              >
+                <Upload size={18} />
+                {uploading ? "Uploading..." : "Upload PDF"}
+              </button>
+              <button
+                onClick={loadDocs}
+                disabled={isLoading}
+                className="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+              >
+                <RefreshCw size={18} />
+              </button>
+            </div>
+
+            {/* Messages */}
+            {message && (
+              <div className={`mt-4 p-3 rounded-lg ${message.includes("Upload failed") || message.includes("failed") ? "bg-red-900/20 text-red-300" : "bg-green-900/20 text-green-300"}`}>
+                {message}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Files List Section */}
+        <div>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-white">Your Files ({docs.length})</h2>
+            <span className="text-sm text-gray-400">Total: {(totalSize / 1024 / 1024).toFixed(2)} MB</span>
           </div>
 
           {isLoading ? (
-            <p className="text-sm text-neutral-400">Loading…</p>
+            <div className="text-center py-12 text-gray-400">Loading documents...</div>
           ) : docs.length === 0 ? (
-            <p className="text-sm text-neutral-500">No files uploaded yet.</p>
+            <div className="rounded-xl border border-gray-800 bg-gray-950 p-12 text-center">
+              <Upload className="mx-auto mb-3 text-gray-600" size={40} />
+              <p className="text-gray-400">No files uploaded yet</p>
+            </div>
           ) : (
             <div className="space-y-2">
               {docs.map((doc) => (
-                <div key={doc._id} className="flex items-center gap-3 rounded-lg border border-neutral-800 p-3">
-                  <div className="flex-1 min-w-0">
-                    {editId === doc._id ? (
-                      <div className="flex items-center gap-2">
-                        <input value={editName} onChange={(e) => setEditName(e.target.value)} className="flex-1 bg-neutral-900 border border-neutral-700 rounded-md px-2 py-1 text-sm" />
-                        <button onClick={() => onRename(doc._id, editName)} className="p-1 text-green-300 hover:text-green-200"><Check size={16} /></button>
-                        <button onClick={() => { setEditId(null); setEditName(""); }} className="p-1 text-neutral-500 hover:text-neutral-400"><X size={16} /></button>
-                      </div>
-                    ) : (
-                      <>
-                        <p className="font-medium text-sm text-white truncate">{doc.fileName}</p>
-                        <p className="text-xs text-neutral-500">{new Date(doc.uploadedAt).toLocaleString()} • {((doc.fileSize || 0) / 1024 / 1024).toFixed(2)} MB</p>
-                      </>
-                    )}
-                  </div>
+                <div
+                  key={doc._id}
+                  className="rounded-lg border border-gray-800 bg-gray-950 p-4 hover:bg-gray-900 transition-colors flex items-center justify-between gap-3"
+                >
+                  {editId === doc._id ? (
+                    <div className="flex-1 flex gap-2">
+                      <input
+                        autoFocus
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") onRename(doc._id, editName);
+                          if (e.key === "Escape") {
+                            setEditId(null);
+                            setEditName("");
+                          }
+                        }}
+                        className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                      />
+                      <button
+                        onClick={() => onRename(doc._id, editName)}
+                        className="p-2 text-green-500 hover:text-green-400 transition-colors"
+                        title="Save"
+                      >
+                        <Check size={18} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditId(null);
+                          setEditName("");
+                        }}
+                        className="p-2 text-gray-500 hover:text-gray-400 transition-colors"
+                        title="Cancel"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-medium truncate">{doc.fileName}</p>
+                      <p className="text-gray-500 text-xs mt-1">
+                        {new Date(doc.uploadedAt).toLocaleDateString()} • {((doc.fileSize || 0) / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                    </div>
+                  )}
 
-                  <button onClick={() => downloadDocument(doc)} title="Download" className="p-1 rounded hover:bg-neutral-800 text-neutral-400 hover:text-white"><Download size={16} /></button>
-                  <button onClick={() => { setEditId(doc._id); setEditName(doc.fileName); }} title="Rename" className="p-1 rounded hover:bg-neutral-800 text-neutral-400 hover:text-white"><Pencil size={16} /></button>
-                  <button onClick={() => onDelete(doc._id)} title="Delete" className="p-1 rounded hover:bg-red-500/20 text-neutral-400 hover:text-red-300"><Trash2 size={16} /></button>
+                  {editId !== doc._id && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => downloadDocument(doc)}
+                        className="p-2 text-gray-500 hover:text-blue-400 transition-colors"
+                        title="Download"
+                      >
+                        <Download size={18} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditId(doc._id);
+                          setEditName(doc.fileName);
+                        }}
+                        className="p-2 text-gray-500 hover:text-gray-300 transition-colors"
+                        title="Rename"
+                      >
+                        <Pencil size={18} />
+                      </button>
+                      <button
+                        onClick={() => onDelete(doc._id)}
+                        className="p-2 text-gray-500 hover:text-red-500 transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
