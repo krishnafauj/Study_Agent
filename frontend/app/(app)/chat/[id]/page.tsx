@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Send, Share2, RotateCcw, Loader2, User, Bot, Copy, Check, Pencil, ChevronUp, X as XIcon } from "lucide-react";
 
@@ -11,7 +11,10 @@ type Message = {
 
 export default function ChatPage() {
     const params = useParams();
+    const searchParams = useSearchParams();
     const id = params.id as string;
+    const fileId = searchParams?.get("fileId") || null;
+    const fileName = searchParams?.get("fileName") ? decodeURIComponent(searchParams.get("fileName")!) : null;
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState<string>("");
@@ -109,6 +112,31 @@ export default function ChatPage() {
             setHistoryLoaded(true);
         });
     }, [id, loadHistory, fetchTitle]);
+
+    // Initialize chat with file context (if provided)
+    useEffect(() => {
+        if (!id) return;
+        const initChatWithContext = async () => {
+            try {
+                const token = localStorage.getItem("authToken");
+                const payload: { fileId?: string; fileName?: string } = {};
+                if (fileId) payload.fileId = fileId;
+                if (fileName) payload.fileName = fileName;
+
+                await fetch(`${API_URL}/api/chat/${id}/init`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify(payload),
+                });
+            } catch (err) {
+                console.error("Failed to init chat with context:", err);
+            }
+        };
+        initChatWithContext();
+    }, [id, fileId, fileName, API_URL]);
 
     // Optimistically tell the Sidebar this chat exists so it shows up immediately
     useEffect(() => {

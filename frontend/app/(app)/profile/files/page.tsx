@@ -81,6 +81,10 @@ export default function ProfileFileStoragePage() {
       const data = await res.json();
       setMessage(`Uploaded: ${data.file.fileName}`);
       setSelectedFile(null);
+      // Emit event for sidebar to update
+      window.dispatchEvent(
+        new CustomEvent("fileUploaded", { detail: data.file })
+      );
       await loadDocs();
     } catch (err) {
       console.error(err);
@@ -122,6 +126,10 @@ export default function ProfileFileStoragePage() {
       setEditId(null);
       setEditName("");
       setMessage("Renamed");
+      // Emit event for sidebar to update
+      window.dispatchEvent(
+        new CustomEvent("fileUpdated", { detail: { fileId: docId, fileName: newName.trim() } })
+      );
       await loadDocs();
     } catch (err) {
       console.error(err);

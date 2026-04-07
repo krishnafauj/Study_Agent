@@ -2,7 +2,15 @@ import express from "express";
 const router = express.Router();
 import { chatStreamHandler } from "./chat/chatStreamController.js";
 import { getChatHistory } from "./chat/chatHistoryController.js";
-import { getChatSessions, getChatTitle, updateChatTitle, deleteChat, initChat } from "./chat/chatSessionController.js";
+import { 
+  getChatSessions, 
+  getChatTitle, 
+  updateChatTitle, 
+  deleteChat, 
+  initChat,
+  getChatsByFile,
+  getChatsByFolder
+} from "./chat/chatSessionController.js";
 
 import authRoutes from "./Auth/auth.js";
 import fileRoutes from "./fileRoutes.js";
@@ -24,6 +32,12 @@ router.get("/chat/:chatId/history", getChatHistory);
 
 // Chat sessions list — GET /api/chats
 router.get("/chats", getChatSessions);
+
+// Chats by file — GET /api/chats/file/:fileId
+router.get("/chats/file/:fileId", getChatsByFile);
+
+// Chats by folder — GET /api/chats/folder/:folderId
+router.get("/chats/folder/:folderId", getChatsByFolder);
 
 // Single chat title — GET /api/chat/:chatId/title
 router.get("/chat/:chatId/title", getChatTitle);
