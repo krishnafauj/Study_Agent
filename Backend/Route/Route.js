@@ -14,6 +14,7 @@ import {
 
 import authRoutes from "./Auth/auth.js";
 import fileRoutes from "./fileRoutes.js";
+import topicRoutes from "./topicRoutes.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 console.log("Route loaded");
 router.use("/auth", authRoutes);
@@ -23,6 +24,9 @@ router.use(verifyToken);
 
 // File storage endpoints (S3-backed)
 router.use(fileRoutes);
+
+// Topic hierarchy endpoints
+router.use(topicRoutes);
 
 // Chat streaming
 router.post("/chat-stream", chatStreamHandler);

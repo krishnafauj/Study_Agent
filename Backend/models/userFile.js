@@ -6,6 +6,7 @@ const userFileSchema = new mongoose.Schema(
     fileName: { type: String, required: true },
     s3Key: { type: String, required: true },
     fileSize: { type: Number, required: true },
+    fileHash: { type: String, unique: true, sparse: true, index: true }, // SHA256 hash for deduplication
     uploadedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }

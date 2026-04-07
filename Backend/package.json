@@ -18,7 +18,7 @@
     "@langchain/openai": "^1.2.13",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "cors": "^2.8.6",
-    "dotenv": "^17.2.4",
+    "dotenv": "^17.4.1",
     "express": "^5.2.1",
     "google-auth-library": "^10.5.0",
     "jsonwebtoken": "^9.0.3",
@@ -26,6 +26,8 @@
     "mongodb": "^7.1.0",
     "mongoose": "^9.2.0",
     "multer": "^1.4.5-lts.1",
-    "openai": "^6.22.0"
+    "openai": "^6.22.0",
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.6.205"
   }
 }
