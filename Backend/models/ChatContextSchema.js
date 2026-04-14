@@ -37,6 +37,4 @@ const ChatContextSchema = new mongoose.Schema({
 
 // 👇 ADD INDEXES HERE
 ChatContextSchema.index({ chatId: 1 });
-ChatContextSchema.index({ fileId: 1 });
-
 export default mongoose.model("ChatContext", ChatContextSchema);
