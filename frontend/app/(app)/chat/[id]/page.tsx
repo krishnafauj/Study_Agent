@@ -14,6 +14,7 @@ export default function ChatPage() {
     const searchParams = useSearchParams();
     const id = params.id as string;
     const fileId = searchParams?.get("fileId") || null;
+    const folderId = searchParams?.get("folderId") || null;
     const fileName = searchParams?.get("fileName") ? decodeURIComponent(searchParams.get("fileName")!) : null;
 
     const [messages, setMessages] = useState<Message[]>([]);
@@ -119,8 +120,9 @@ export default function ChatPage() {
         const initChatWithContext = async () => {
             try {
                 const token = localStorage.getItem("authToken");
-                const payload: { fileId?: string; fileName?: string } = {};
+                const payload: { fileId?: string; folderId?: string; fileName?: string } = {};
                 if (fileId) payload.fileId = fileId;
+                if (folderId) payload.folderId = folderId;
                 if (fileName) payload.fileName = fileName;
 
                 await fetch(`${API_URL}/api/chat/${id}/init`, {
@@ -202,7 +204,12 @@ export default function ChatPage() {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ message: textToSend, chatId: id }),
+                body: JSON.stringify({
+                    message: textToSend,
+                    chatId: id,
+                    ...(fileId && { fileId }),
+                    ...(folderId && { folderId }),
+                }),
             });
 
             const reader = response.body?.getReader();

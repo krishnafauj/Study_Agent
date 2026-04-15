@@ -10,7 +10,9 @@ const ChatContextSchema = new mongoose.Schema({
 
   userId: mongoose.Schema.Types.ObjectId,
 
-  fileId: mongoose.Schema.Types.ObjectId,
+  fileId: { type: String, default: null },
+
+  folderId: { type: String, default: null },
 
   summary: String,
 

@@ -9,6 +9,7 @@ import connectDB from "./models/MongoConnect.js";
 
 // Your routes
 import apiRoutes from "./Route/Route.js";
+import internalMcpRoutes from "./Route/internalMcpRoutes.js";
 
 // MCP client imports
 // import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -31,6 +32,7 @@ app.use(
 app.use(express.json());
 
 app.use("/api", apiRoutes);
+app.use("/api/internal", internalMcpRoutes); // MCP-only internal routes
 
 // const transport = new StdioClientTransport({
 //   command: "node",

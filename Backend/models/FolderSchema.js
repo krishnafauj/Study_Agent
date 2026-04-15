@@ -18,7 +18,15 @@ const FolderSchema = new mongoose.Schema({
       topicId: String,
       topicName: String,
       subTopics: [String],
-      marks: [{ type: String }],
+      marks: [
+        {
+          score: { type: Number, required: true },      // marks obtained
+          total: { type: Number, required: true },      // out of
+          attemptedAt: { type: Date, default: Date.now }
+        }
+      ],
+      performanceScore: { type: Number, default: null }, // avg percentage (0-100), null = not attempted
+      weakFlag: { type: Boolean, default: false },        // auto-set when performanceScore < 70
       embedding: [Number]
     }
   ],

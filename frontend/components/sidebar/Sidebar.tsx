@@ -599,7 +599,7 @@ export default function Sidebar() {
                               ) : (
                                 <>
                                   <Link
-                                    href={`/chat/${chat.chatId}`}
+                                    href={`/chat/${chat.chatId}?fileId=${file._id}&fileName=${encodeURIComponent(file.fileName)}`}
                                     onClick={() => setMobileOpen(false)}
                                     className={`flex-1 min-w-0 text-sm truncate ${isActive ? 'text-purple-300' : 'text-neutral-500 group-hover:text-white'}`}
                                     title={chat.title}

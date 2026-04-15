@@ -257,7 +257,7 @@ export default function FileDashboardPage() {
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div
                       className="flex-1 cursor-pointer"
-                      onClick={() => router.push(`/chat/${chat.chatId}`)}
+                      onClick={() => router.push(`/chat/${chat.chatId}?fileId=${fileId}&fileName=${encodeURIComponent(fileName)}`)}
                     >
                       {renamingId === chat.chatId ? (
                         <div className="flex gap-2">
@@ -297,7 +297,7 @@ export default function FileDashboardPage() {
 
                   <div className="flex gap-2">
                     <button
-                      onClick={() => router.push(`/chat/${chat.chatId}`)}
+                      onClick={() => router.push(`/chat/${chat.chatId}?fileId=${fileId}&fileName=${encodeURIComponent(fileName)}`)}
                       className="flex-1 px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-sm font-medium transition-colors flex items-center justify-center gap-2"
                     >
                       <MessageSquare size={14} />
