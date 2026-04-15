@@ -3,6 +3,7 @@
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Send, Share2, RotateCcw, Loader2, User, Bot, Copy, Check, Pencil, ChevronUp, X as XIcon } from "lucide-react";
+import Markdown from "@/components/chat/Markdown";
 
 type Message = {
     role: "user" | "assistant";
@@ -492,7 +493,11 @@ export default function ChatPage() {
                                                     : "bg-neutral-800 text-neutral-200 border border-neutral-700 rounded-tl-sm"
                                                 }`}
                                         >
-                                            {msg.content}
+                                            {msg.role === "assistant" ? (
+                                                <Markdown content={msg.content} />
+                                            ) : (
+                                                msg.content
+                                            )}
                                         </div>
                                     )}
 
@@ -538,7 +543,9 @@ export default function ChatPage() {
                                     <Bot size={18} />
                                 </div>
                                 <div className="p-3 md:p-4 bg-neutral-800 text-neutral-200 border border-neutral-700 rounded-2xl rounded-tl-sm text-sm md:text-base leading-relaxed max-w-[85%] md:max-w-[75%]">
-                                    {streamingText || (
+                                    {streamingText ? (
+                                        <Markdown content={streamingText} isStreaming={true} />
+                                    ) : (
                                         <span className="flex items-center gap-3 text-neutral-400">
                                             <Loader2 size={16} className="animate-spin text-purple-500" />
                                             Generating response...
