@@ -235,7 +235,7 @@ export default function Sidebar() {
       if (data.success) {
         setChats(prev => prev.filter(c => c.chatId !== chatId))
         // If the deleted chat was active, go home
-        if (chatId === activeChatId) router.push('/')
+        if (chatId === activeChatId) router.push('/home')
       }
     } catch (err) {
       console.error('Delete failed:', err)
@@ -329,7 +329,7 @@ export default function Sidebar() {
         {/* NEW CHAT */}
         <div className="px-4 mt-2">
           <button
-            onClick={() => { router.push('/'); setMobileOpen(false) }}
+            onClick={() => { router.push('/home'); setMobileOpen(false) }}
             className={`group flex items-center justify-center gap-3 w-full rounded-xl transition-all duration-300 shadow-lg
             bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 hover:scale-[1.02]
             ${isExpanded ? 'h-11 px-4' : 'h-11 w-11'}`}

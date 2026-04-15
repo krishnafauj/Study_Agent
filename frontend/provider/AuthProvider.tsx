@@ -17,19 +17,16 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     const isAuthenticated = !!(token && user);
 
     // 3. Define Route Logic
-    const isLoginPage = pathname === '(auth)/login';
-
-    if (isLoading) {
-        // Optional: Add artificial delay or logic here if needed
-    }
+    const isLoginPage = pathname === '/login';
+    const isLandingPage = pathname === '/';
 
     // LOGIC:
-    // If Authenticated AND on /login -> Kick to Dashboard/Home
+    // If Authenticated AND on /login → go to /home
     if (isAuthenticated && isLoginPage) {
-      router.push('/'); // or '/dashboard'
-    } 
-    // If NOT Authenticated AND on a protected route (anything not /login) -> Kick to /login
-    else if (!isAuthenticated && !isLoginPage) {
+      router.push('/home');
+    }
+    // If NOT Authenticated AND on a protected route (not /login, not /) → go to /login
+    else if (!isAuthenticated && !isLoginPage && !isLandingPage) {
       router.push('/login');
     }
 

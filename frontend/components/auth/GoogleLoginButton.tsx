@@ -55,7 +55,7 @@ const router = useRouter();
               }
 
          
-              router.push("/");
+              router.push("/home");
 
             } catch (error) {
               console.error("Login error:", error);
