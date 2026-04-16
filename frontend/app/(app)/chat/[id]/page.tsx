@@ -219,11 +219,13 @@ export default function ChatPage() {
 
             let assistantText = "";
             let isMessageSaved = false;
+            let buffer = ""; // accumulates partial SSE data across network chunks
 
             while (true) {
                 const { done, value } = await reader.read();
-                
+
                 if (done) {
+                    // Stream closed — save whatever we have
                     if (!isMessageSaved && assistantText.trim()) {
                         setMessages((prev) => [
                             ...prev,
@@ -234,30 +236,58 @@ export default function ChatPage() {
                     break;
                 }
 
-                const chunk = decoder.decode(value);
-                const lines = chunk.split("\n\n");
+                // Append new bytes to the running buffer
+                buffer += decoder.decode(value, { stream: true });
 
-                for (const line of lines) {
+                // SSE events are separated by double newline
+                const events = buffer.split("\n\n");
+
+                // The last element may be an incomplete event — keep it in the buffer
+                buffer = events.pop() ?? "";
+
+                for (const event of events) {
+                    const line = event.trim();
                     if (!line.startsWith("data:")) continue;
-                    const token = line.replace("data:", "");
-                    const cleanToken = token.trim();
-                    
-                    if (!cleanToken) continue;
-                    
-                    if (cleanToken === "[DONE]") {
-                        if (!isMessageSaved) {
-                            setMessages((prev) => [
-                                ...prev,
-                                { role: "assistant", content: assistantText },
-                            ]);
-                            isMessageSaved = true;
-                            fetchTitle();
+
+                    const raw = line.slice("data:".length).trim();
+                    if (!raw) continue;
+
+                    // Try to parse as JSON { text } or { done }
+                    try {
+                        const parsed = JSON.parse(raw);
+
+                        if (parsed.done) {
+                            if (!isMessageSaved) {
+                                setMessages((prev) => [
+                                    ...prev,
+                                    { role: "assistant", content: assistantText },
+                                ]);
+                                isMessageSaved = true;
+                                fetchTitle();
+                            }
+                            break;
                         }
-                        break; 
+
+                        if (typeof parsed.text === "string") {
+                            assistantText += parsed.text;
+                            setStreamingText(assistantText);
+                        }
+                    } catch {
+                        // Legacy plain-text fallback (shouldn't happen with new backend)
+                        if (raw === "[DONE]") {
+                            if (!isMessageSaved) {
+                                setMessages((prev) => [
+                                    ...prev,
+                                    { role: "assistant", content: assistantText },
+                                ]);
+                                isMessageSaved = true;
+                                fetchTitle();
+                            }
+                        } else {
+                            assistantText += raw;
+                            setStreamingText(assistantText);
+                        }
                     }
-                    
-                    assistantText += token;
-                    setStreamingText(assistantText);
                 }
             }
         } catch (error) {

@@ -1,1 +1,19 @@
-node_modules
+# Node dependencies
+node_modules/
+
+# Python virtual environment
+venv/
+
+# Code review graph files
+.code-review-graph/
+
+# Claude / AI local configs
+.claude
+.kiro
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment variables
+.env

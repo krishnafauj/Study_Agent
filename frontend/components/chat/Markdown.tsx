@@ -7,15 +7,17 @@ type Token =
   | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
   | { type: "hr" }
   | { type: "blockquote"; lines: string[] }
-  | { type: "codeblock"; lang: string; code: string }
+  | { type: "codeblock"; lang: string; code: string; closed: boolean }
   | { type: "ul"; items: string[] }
   | { type: "ol"; items: string[] }
   | { type: "paragraph"; lines: string[] };
 
 // ─── Parse inline markdown (bold, italic, code, links) ────────────────────────
-function parseInline(text: string): React.ReactNode[] {
+// ADDED `prefix` parameter to guarantee unique keys across flatMap merges
+function parseInline(text: string, prefix: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g;
+
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let keyCounter = 0;
@@ -24,7 +26,10 @@ function parseInline(text: string): React.ReactNode[] {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
-    const k = `${match.index}-${keyCounter++}`;
+    
+    // Combine our unique block/line prefix with the regex index
+    const k = `${prefix}-${match.index}-${keyCounter++}`;
+    
     if (match[2] !== undefined) {
       parts.push(<strong key={k} className="font-semibold text-white">{match[2]}</strong>);
     } else if (match[3] !== undefined) {
@@ -37,6 +42,7 @@ function parseInline(text: string): React.ReactNode[] {
       );
     } else if (match[5] !== undefined) {
       parts.push(
+        // FIXED: Restored the <a tag opener
         <a
           key={k}
           href={match[6]}
@@ -54,11 +60,79 @@ function parseInline(text: string): React.ReactNode[] {
   return parts;
 }
 
+// ─── Code block with copy button ──────────────────────────────────────────────
+function CodeBlock({
+  lang,
+  code,
+  isStreaming,
+  closed,
+}: {
+  lang: string;
+  code: string;
+  isStreaming: boolean;
+  closed: boolean;
+}) {
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="rounded-xl overflow-hidden border border-neutral-700">
+      {/* Header bar */}
+      <div className="px-4 py-1.5 bg-neutral-900 border-b border-neutral-700 flex items-center justify-between">
+        <span className="text-[11px] text-purple-400 font-mono">
+          {lang || "code"}
+        </span>
+        <div className="flex items-center gap-2">
+          {isStreaming && !closed && (
+            <span className="text-neutral-500 text-[10px]">streaming…</span>
+          )}
+          <button
+            onClick={handleCopy}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium transition-all duration-150
+              ${
+                copied
+                  ? "bg-green-500/20 text-green-400 border border-green-600/40"
+                  : "bg-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700 border border-neutral-700"
+              }`}
+          >
+            {copied ? (
+              <>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                  <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Copied!
+              </>
+            ) : (
+              <>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                  <rect x="4" y="1" width="7" height="8" rx="1" stroke="currentColor" strokeWidth="1.3" />
+                  <rect x="1" y="3" width="7" height="8" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none" />
+                </svg>
+                Copy
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+      {/* Code area */}
+      <pre className="bg-neutral-950 p-4 overflow-x-auto text-xs leading-relaxed">
+        <code className="text-green-300 font-mono whitespace-pre">{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 // ─── Block-level tokenizer ────────────────────────────────────────────────────
-// Key fix: each NON-BLANK line that's a regular paragraph becomes its own token,
-// so blank lines between paragraphs create real visual separation.
 function tokenize(markdown: string): Token[] {
-  const lines = markdown.split("\n");
+  // Guard against undefined streams
+  const safeMarkdown = markdown || "";
+  const lines = safeMarkdown.split("\n");
   const tokens: Token[] = [];
   let i = 0;
 
@@ -70,12 +144,17 @@ function tokenize(markdown: string): Token[] {
       const lang = line.slice(3).trim();
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !/^```/.test(lines[i])) {
+      let closed = false;
+      while (i < lines.length) {
+        if (/^```/.test(lines[i])) {
+          closed = true;
+          i++;
+          break;
+        }
         codeLines.push(lines[i]);
         i++;
       }
-      i++; // skip closing ```
-      tokens.push({ type: "codeblock", lang, code: codeLines.join("\n") });
+      tokens.push({ type: "codeblock", lang, code: codeLines.join("\n"), closed });
       continue;
     }
 
@@ -131,15 +210,13 @@ function tokenize(markdown: string): Token[] {
       continue;
     }
 
-    // ── Blank line → separator (skip, spacing handled by space-y wrapper) ────
+    // ── Blank line ───────────────────────────────────────────────────────────
     if (line.trim() === "") {
       i++;
       continue;
     }
 
-    // ── Paragraph: collect lines until a blank line or block element ─────────
-    // Each paragraph group (separated by blank lines) becomes ONE token,
-    // with internal soft-wraps joined as a single flow of text.
+    // ── Paragraph ────────────────────────────────────────────────────────────
     const paraLines: string[] = [];
     while (
       i < lines.length &&
@@ -163,9 +240,10 @@ function tokenize(markdown: string): Token[] {
 }
 
 // ─── Render tokens to JSX ─────────────────────────────────────────────────────
-function renderToken(token: Token, idx: number): React.ReactNode {
-  switch (token.type) {
+function renderToken(token: Token, idx: number, isStreaming: boolean): React.ReactNode {
+  const baseKey = `block-${idx}`;
 
+  switch (token.type) {
     case "heading": {
       const cls: Record<number, string> = {
         1: "text-xl font-bold text-white leading-tight",
@@ -175,42 +253,41 @@ function renderToken(token: Token, idx: number): React.ReactNode {
         5: "text-sm font-semibold text-neutral-300",
         6: "text-sm font-medium text-neutral-400",
       };
-      return <div key={idx} className={cls[token.level]}>{parseInline(token.text)}</div>;
+      return <div key={baseKey} className={cls[token.level]}>{parseInline(token.text, baseKey)}</div>;
     }
 
     case "hr":
-      return <hr key={idx} className="border-neutral-700" />;
+      return <hr key={baseKey} className="border-neutral-700" />;
 
     case "blockquote":
       return (
-        <blockquote key={idx} className="border-l-4 border-purple-500 pl-4 py-0.5 bg-purple-500/10 rounded-r-lg">
+        <blockquote key={baseKey} className="border-l-4 border-purple-500 pl-4 py-0.5 bg-purple-500/10 rounded-r-lg">
           {token.lines.map((l, j) => (
-            <p key={j} className="text-sm text-neutral-300 leading-relaxed">{parseInline(l)}</p>
+            <p key={`${baseKey}-p-${j}`} className="text-sm text-neutral-300 leading-relaxed">
+              {parseInline(l, `${baseKey}-l-${j}`)}
+            </p>
           ))}
         </blockquote>
       );
 
     case "codeblock":
       return (
-        <div key={idx} className="rounded-xl overflow-hidden border border-neutral-700">
-          {token.lang && (
-            <div className="px-4 py-1.5 bg-neutral-900 border-b border-neutral-700 text-[11px] text-purple-400 font-mono">
-              {token.lang}
-            </div>
-          )}
-          <pre className="bg-neutral-950 p-4 overflow-x-auto text-xs leading-relaxed">
-            <code className="text-green-300 font-mono whitespace-pre">{token.code}</code>
-          </pre>
-        </div>
+        <CodeBlock
+          key={baseKey}
+          lang={token.lang}
+          code={token.code}
+          isStreaming={isStreaming}
+          closed={token.closed}
+        />
       );
 
     case "ul":
       return (
-        <ul key={idx} className="space-y-2 pl-1">
+        <ul key={baseKey} className="space-y-2 pl-1">
           {token.items.map((item, j) => (
-            <li key={j} className="flex items-start gap-2.5 text-sm text-neutral-200 leading-relaxed">
+            <li key={`${baseKey}-li-${j}`} className="flex items-start gap-2.5 text-sm text-neutral-200 leading-relaxed">
               <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
-              <span>{parseInline(item)}</span>
+              <span>{parseInline(item, `${baseKey}-item-${j}`)}</span>
             </li>
           ))}
         </ul>
@@ -218,13 +295,13 @@ function renderToken(token: Token, idx: number): React.ReactNode {
 
     case "ol":
       return (
-        <ol key={idx} className="space-y-2.5 pl-1">
+        <ol key={baseKey} className="space-y-2.5 pl-1">
           {token.items.map((item, j) => (
-            <li key={j} className="flex items-start gap-2.5 text-sm text-neutral-200 leading-relaxed">
+            <li key={`${baseKey}-li-${j}`} className="flex items-start gap-2.5 text-sm text-neutral-200 leading-relaxed">
               <span className="shrink-0 min-w-[22px] h-[22px] rounded-full bg-purple-600/40 text-purple-300 text-xs flex items-center justify-center font-bold mt-0.5">
                 {j + 1}
               </span>
-              <span className="flex-1">{parseInline(item)}</span>
+              <span className="flex-1">{parseInline(item, `${baseKey}-item-${j}`)}</span>
             </li>
           ))}
         </ol>
@@ -232,13 +309,11 @@ function renderToken(token: Token, idx: number): React.ReactNode {
 
     case "paragraph":
       return (
-        <p key={idx} className="text-sm leading-[1.75] text-neutral-200">
-          {/* Join lines with a space — soft line breaks within same para */}
+        <p key={baseKey} className="text-sm leading-[1.75] text-neutral-200">
           {token.lines.flatMap((line, j) => {
-            const parsed = parseInline(line);
-            return j < token.lines.length - 1
-              ? [...parsed, " "]
-              : parsed;
+            // Because we pass the line index 'j', the keys will NEVER duplicate in the flatMap
+            const parsed = parseInline(line, `${baseKey}-line-${j}`);
+            return j < token.lines.length - 1 ? [...parsed, " "] : parsed;
           })}
         </p>
       );
@@ -258,9 +333,8 @@ export default function Markdown({ content, isStreaming = false }: MarkdownProps
   const tokens = tokenize(content);
 
   return (
-    // space-y-3 gives consistent 12px gap between EVERY block element
     <div className="flex flex-col gap-3">
-      {tokens.map((token, idx) => renderToken(token, idx))}
+      {tokens.map((token, idx) => renderToken(token, idx, isStreaming))}
       {isStreaming && (
         <span className="inline-block w-0.5 h-4 bg-purple-400 ml-0.5 animate-pulse align-middle" />
       )}

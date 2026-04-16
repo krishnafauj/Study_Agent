@@ -206,7 +206,8 @@ export const chatStreamHandler = async (req, res) => {
     for await (const chunk of stream) {
       const token = chunk.content || "";
       assistantText += token;
-      res.write(`data: ${token}\n\n`);
+      // JSON-encode so embedded newlines/special chars don't break SSE format
+      res.write(`data: ${JSON.stringify({ text: token })}\n\n`);
     }
 
     // ─── Save messages ────────────────────────────────────────────────────
@@ -256,8 +257,8 @@ export const chatStreamHandler = async (req, res) => {
       { upsert: true }
     );
 
-    // ─── Done ─────────────────────────────────────────────────────────────
-    res.write("data: [DONE]\n\n");
+    // ─── Done ──────────────────────────────────────────────────────
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.end();
 
   } catch (error) {
