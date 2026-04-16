@@ -23,7 +23,7 @@ app.use(
   cors({
     origin: [
       "http://localhost:3000",
-      "https://study-agent-iota.vercel.app"
+      "https://agentstudy.vercel.app"
     ],
     credentials: true
   })
