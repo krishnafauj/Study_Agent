@@ -43,6 +43,11 @@ export default function ChatPage() {
     const [renameValue, setRenameValue] = useState<string>("");
     const titleInputRef = useRef<HTMLInputElement>(null);
 
+    // Score toast
+    type ScoreToast = { topicName: string; score: number; total: number; performanceScore: number; weakFlag: boolean };
+    const [scoreToast, setScoreToast] = useState<ScoreToast | null>(null);
+    const scoreToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const messagesTopRef = useRef<HTMLDivElement>(null);
     const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -145,9 +150,18 @@ export default function ChatPage() {
     useEffect(() => {
         if (!id) return;
         window.dispatchEvent(
-            new CustomEvent("chatOpened", { detail: { chatId: id, title: "New Chat" } })
+            new CustomEvent("chatOpened", { 
+                detail: { 
+                    chatId: id, 
+                    title: "New Chat",
+                    fileId: fileId || undefined,
+                    fileName: fileName || undefined
+                } 
+            })
         );
-    }, [id]);
+        // Also tell the sidebar to do a full refresh to catch any new assigned files
+        window.dispatchEvent(new CustomEvent("sidebarRefresh"));
+    }, [id, fileId, fileName]);
 
     // When the real title is loaded, sync it to the sidebar too
     useEffect(() => {
@@ -279,6 +293,15 @@ export default function ChatPage() {
                                 new CustomEvent("chatTitleUpdated", { detail: { chatId: id, title: parsed.title } })
                             );
                         }
+
+                        if (parsed.scoreUpdate) {
+                            const su = parsed.scoreUpdate;
+                            setScoreToast(su);
+                            if (scoreToastTimer.current) clearTimeout(scoreToastTimer.current);
+                            scoreToastTimer.current = setTimeout(() => setScoreToast(null), 6000);
+                            // Notify records tab to refresh
+                            window.dispatchEvent(new CustomEvent("scoresUpdated"));
+                        }
                     } catch {
                         // Legacy plain-text fallback (shouldn't happen with new backend)
                         if (raw === "[DONE]") {
@@ -363,6 +386,42 @@ export default function ChatPage() {
 
     return (
         <div className="h-[100dvh] bg-neutral-950 p-2 md:p-4 font-sans flex flex-col w-full">
+
+            {/* Score Toast */}
+            {scoreToast && (
+                <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-right-4 duration-300">
+                    <div className={`flex items-start gap-3 px-4 py-3 rounded-xl shadow-2xl border max-w-xs
+                        ${scoreToast.weakFlag
+                            ? "bg-orange-950/90 border-orange-700/50 text-orange-200"
+                            : "bg-emerald-950/90 border-emerald-700/50 text-emerald-200"
+                        } backdrop-blur-md`}>
+                        <div className={`text-2xl font-black shrink-0 leading-none
+                            ${scoreToast.weakFlag ? "text-orange-400" : "text-emerald-400"}`}>
+                            {scoreToast.score >= 8 ? "🌟" : scoreToast.score >= 6 ? "✅" : scoreToast.score >= 4 ? "📝" : "⚠️"}
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-xs font-semibold uppercase tracking-wider opacity-70 mb-0.5">Score Recorded</p>
+                            <p className="font-bold text-sm leading-tight truncate">{scoreToast.topicName}</p>
+                            <div className="flex items-center gap-2 mt-1.5">
+                                <span className={`text-lg font-black ${scoreToast.weakFlag ? "text-orange-300" : "text-emerald-300"}`}>
+                                    {scoreToast.score}/{scoreToast.total}
+                                </span>
+                                <div className="flex-1 h-1.5 bg-black/30 rounded-full overflow-hidden">
+                                    <div
+                                        className={`h-full rounded-full transition-all ${scoreToast.weakFlag ? "bg-orange-400" : "bg-emerald-400"}`}
+                                        style={{ width: `${scoreToast.performanceScore}%` }}
+                                    />
+                                </div>
+                                <span className="text-xs opacity-70">{Math.round(scoreToast.performanceScore)}%</span>
+                            </div>
+                            {scoreToast.weakFlag && (
+                                <p className="text-xs text-orange-400 mt-1">💡 Needs more practice</p>
+                            )}
+                        </div>
+                        <button onClick={() => setScoreToast(null)} className="text-current opacity-40 hover:opacity-80 shrink-0 mt-0.5">✕</button>
+                    </div>
+                </div>
+            )}
             
             {/* Custom Scrollbar Styles Injected Here */}
             <style>{`

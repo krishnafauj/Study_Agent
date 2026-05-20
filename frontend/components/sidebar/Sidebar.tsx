@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { LogOut, Pencil, Trash2, Check, X as XIcon } from 'lucide-react'
+import { LogOut, Pencil, Trash2, Check, X as XIcon, Sparkles } from 'lucide-react'
 import {
   Plus,
   ChevronLeft,
@@ -35,6 +35,7 @@ type FileRecord = {
   fileName: string
   s3Key: string
   uploadedAt: string
+  isOwner?: boolean
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
@@ -100,6 +101,12 @@ export default function Sidebar() {
     }
   }
 
+  // Stable refs so event listeners always call the latest fetch functions
+  const fetchChatsRef = useRef(fetchChats)
+  const fetchFilesRef = useRef(fetchFiles)
+  useEffect(() => { fetchChatsRef.current = fetchChats }, [fetchChats])
+  useEffect(() => { fetchFilesRef.current = fetchFiles }, [fetchFiles])
+
   useEffect(() => {
     fetchChats()
     fetchFiles()
@@ -108,12 +115,28 @@ export default function Sidebar() {
   // Listen for optimistic events from the chat page
   useEffect(() => {
     const handleChatOpened = (e: Event) => {
-      const { chatId, title } = (e as CustomEvent).detail as ChatSession
+      const detail = (e as CustomEvent).detail as ChatSession & { fileId?: string; fileName?: string }
+      const { chatId, title, fileId, fileName } = detail
+
       setChats(prev => {
-        // Don't duplicate if it's already in the list
         if (prev.some(c => c.chatId === chatId)) return prev
-        return [{ chatId, title, updatedAt: new Date().toISOString() }, ...prev]
+        return [{ chatId, title, fileId, updatedAt: new Date().toISOString() }, ...prev]
       })
+
+      // If the chat belongs to a file, make sure the file exists in our list
+      // and auto-expand its folder in the sidebar
+      if (fileId) {
+        setFiles(prev => {
+          if (prev.some(f => f._id === fileId)) {
+            // File already exists, just expand it
+            setExpandedFiles(s => new Set([...s, fileId]))
+            return prev
+          }
+          // File not in list yet (e.g. newly assigned) — add a placeholder and refresh
+          setExpandedFiles(s => new Set([...s, fileId]))
+          return prev
+        })
+      }
     }
 
     const handleTitleUpdated = (e: Event) => {
@@ -131,15 +154,23 @@ export default function Sidebar() {
       setFiles(prev => [file, ...prev])
     }
 
+    // Full refresh triggered when a new chat starts (catches assigned files)
+    const handleSidebarRefresh = () => {
+      fetchChatsRef.current()
+      fetchFilesRef.current()
+    }
+
     window.addEventListener('chatOpened', handleChatOpened)
     window.addEventListener('chatTitleUpdated', handleTitleUpdated)
     window.addEventListener('fileUpdated', handleFileUpdated)
     window.addEventListener('fileUploaded', handleFileUploaded)
+    window.addEventListener('sidebarRefresh', handleSidebarRefresh)
     return () => {
       window.removeEventListener('chatOpened', handleChatOpened)
       window.removeEventListener('chatTitleUpdated', handleTitleUpdated)
       window.removeEventListener('fileUpdated', handleFileUpdated)
       window.removeEventListener('fileUploaded', handleFileUploaded)
+      window.removeEventListener('sidebarRefresh', handleSidebarRefresh)
     }
   }, [])
 
@@ -157,12 +188,17 @@ export default function Sidebar() {
 
   // Organize chats by file/folder
   const organizedChats = useMemo(() => {
-    const byFile: Record<string, { file: FileRecord; chats: ChatSession[] }> = {}
+    const byFileOwner: Record<string, { file: FileRecord; chats: ChatSession[] }> = {}
+    const byFileAssigned: Record<string, { file: FileRecord; chats: ChatSession[] }> = {}
     const globalChats: ChatSession[] = []
 
     // First, initialize all files
     files.forEach((file) => {
-      byFile[file._id] = { file, chats: [] }
+      if (file.isOwner !== false) {
+        byFileOwner[file._id] = { file, chats: [] }
+      } else {
+        byFileAssigned[file._id] = { file, chats: [] }
+      }
     })
 
     // Then add chats to their files
@@ -172,15 +208,17 @@ export default function Sidebar() {
 
     filteredChats.forEach((chat) => {
       if (chat.fileId) {
-        if (byFile[chat.fileId]) {
-          byFile[chat.fileId].chats.push(chat)
+        if (byFileOwner[chat.fileId]) {
+          byFileOwner[chat.fileId].chats.push(chat)
+        } else if (byFileAssigned[chat.fileId]) {
+          byFileAssigned[chat.fileId].chats.push(chat)
         }
       } else {
         globalChats.push(chat)
       }
     })
 
-    return { byFile, globalChats }
+    return { byFileOwner, byFileAssigned, globalChats }
   }, [chats, files, searchQuery])
 
   // Toggle file expansion
@@ -269,7 +307,7 @@ export default function Sidebar() {
   const menuItems = [
     { icon: History, label: 'Past Exam History', color: 'text-pink-400', path: '/history' },
     { icon: FileText, label: 'Records', color: 'text-indigo-400', path: '/records' },
-    { icon: Lightbulb, label: 'Suggestions & News', color: 'text-orange-400', path: '/suggestions' },
+    { icon: Sparkles, label: 'AI Suggestions', color: 'text-purple-400', path: '/suggestions' },
     { icon: User, label: 'Profile Settings', color: 'text-emerald-400', path: '/profile' },
     { icon: FileText, label: 'My Files', color: 'text-cyan-400', path: '/profile/files' },
   ]
@@ -496,8 +534,11 @@ export default function Sidebar() {
                 </div>
               )}
 
-              {/* Chats by File */}
-              {Object.entries(organizedChats.byFile).map(([fileId, fileData]) => {
+              {/* My Files */}
+              {Object.keys(organizedChats.byFileOwner).length > 0 && isExpanded && (
+                <p className="text-xs text-neutral-600 px-3 mt-4 mb-1 uppercase tracking-wider">My Files</p>
+              )}
+              {Object.entries(organizedChats.byFileOwner).map(([fileId, fileData]) => {
                 const isExpanding = expandedFiles.has(fileId)
                 const { file, chats: fileChats } = fileData
                 return (
@@ -516,7 +557,6 @@ export default function Sidebar() {
                       </button>
                       <File size={14} className="shrink-0 text-cyan-400" />
                       
-                      {/* File name - clickable to dashboard */}
                       <button
                         onClick={() => {
                           router.push(`/dashboard/${fileId}`)
@@ -528,9 +568,7 @@ export default function Sidebar() {
                         {file.fileName}
                       </button>
 
-                      {/* File actions - appear on hover */}
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                        {/* Create chat button */}
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
@@ -541,7 +579,6 @@ export default function Sidebar() {
                         >
                           <Plus size={14} />
                         </button>
-                        {/* Delete file button */}
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
@@ -555,79 +592,199 @@ export default function Sidebar() {
                       </div>
                     </div>
 
-                    {/* File chats - shown when expanded */}
                     {isExpanding && isExpanded && (
                       <div className="ml-4 border-l border-neutral-700/50 pl-2">
                         {fileChats.length === 0 ? (
                           <p className="text-xs text-neutral-600 px-2 py-1.5">No chats yet</p>
                         ) : (
                           fileChats.map((chat) => {
-                          const isActive = chat.chatId === activeChatId
-                          const isRenaming = renamingId === chat.chatId
-
-                          return (
-                            <div
-                              key={chat.chatId}
-                              className={`group flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all mb-0.5
-                                ${isActive ? 'bg-purple-600/20 border border-purple-700/40' : 'hover:bg-neutral-900/50'}
-                              `}
-                            >
-                              <MessageSquare
-                                size={14}
-                                className={`shrink-0 ${isActive ? 'text-purple-400' : 'text-neutral-600 group-hover:text-purple-400'}`}
-                              />
-
-                              {isRenaming ? (
-                                <div className="flex items-center gap-1 flex-1 min-w-0">
-                                  <input
-                                    ref={renameInputRef}
-                                    value={renameValue}
-                                    onChange={(e) => setRenameValue(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') submitRename(chat.chatId)
-                                      if (e.key === 'Escape') cancelRename()
-                                    }}
-                                    className="flex-1 min-w-0 bg-neutral-950 border border-purple-500 rounded-lg px-2 py-0.5 text-xs text-white outline-none"
-                                  />
-                                  <button onClick={() => submitRename(chat.chatId)} className="text-green-400 hover:text-green-300 shrink-0">
-                                    <Check size={13} />
-                                  </button>
-                                  <button onClick={cancelRename} className="text-neutral-500 hover:text-white shrink-0">
-                                    <XIcon size={13} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <>
-                                  <Link
-                                    href={`/chat/${chat.chatId}?fileId=${file._id}&fileName=${encodeURIComponent(file.fileName)}`}
-                                    onClick={() => setMobileOpen(false)}
-                                    className={`flex-1 min-w-0 text-sm truncate ${isActive ? 'text-purple-300' : 'text-neutral-500 group-hover:text-white'}`}
-                                    title={chat.title}
-                                  >
-                                    {chat.title}
-                                  </Link>
-
-                                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                    <button
-                                      onClick={(e) => { e.preventDefault(); startRename(chat) }}
-                                      className="p-1 rounded hover:bg-neutral-700 text-neutral-600 hover:text-purple-400 transition-colors"
-                                      title="Rename"
-                                    >
-                                      <Pencil size={12} />
+                            const isActive = chat.chatId === activeChatId
+                            const isRenaming = renamingId === chat.chatId
+                            return (
+                              <div
+                                key={chat.chatId}
+                                className={`group flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all mb-0.5
+                                  ${isActive ? 'bg-purple-600/20 border border-purple-700/40' : 'hover:bg-neutral-900/50'}
+                                `}
+                              >
+                                <MessageSquare
+                                  size={14}
+                                  className={`shrink-0 ${isActive ? 'text-purple-400' : 'text-neutral-600 group-hover:text-purple-400'}`}
+                                />
+                                {isRenaming ? (
+                                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                                    <input
+                                      ref={renameInputRef}
+                                      value={renameValue}
+                                      onChange={(e) => setRenameValue(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') submitRename(chat.chatId)
+                                        if (e.key === 'Escape') cancelRename()
+                                      }}
+                                      className="flex-1 min-w-0 bg-neutral-950 border border-purple-500 rounded-lg px-2 py-0.5 text-xs text-white outline-none"
+                                    />
+                                    <button onClick={() => submitRename(chat.chatId)} className="text-green-400 hover:text-green-300 shrink-0">
+                                      <Check size={13} />
                                     </button>
-                                    <button
-                                      onClick={(e) => { e.preventDefault(); handleDelete(chat.chatId) }}
-                                      className="p-1 rounded hover:bg-red-500/20 text-neutral-600 hover:text-red-400 transition-colors"
-                                      title="Delete"
-                                    >
-                                      <Trash2 size={12} />
+                                    <button onClick={cancelRename} className="text-neutral-500 hover:text-white shrink-0">
+                                      <XIcon size={13} />
                                     </button>
                                   </div>
-                                </>
-                              )}
-                            </div>
-                          )
-                        })
+                                ) : (
+                                  <>
+                                    <Link
+                                      href={`/chat/${chat.chatId}?fileId=${file._id}&fileName=${encodeURIComponent(file.fileName)}`}
+                                      onClick={() => setMobileOpen(false)}
+                                      className={`flex-1 min-w-0 text-sm truncate ${isActive ? 'text-purple-300' : 'text-neutral-500 group-hover:text-white'}`}
+                                      title={chat.title}
+                                    >
+                                      {chat.title}
+                                    </Link>
+                                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); startRename(chat) }}
+                                        className="p-1 rounded hover:bg-neutral-700 text-neutral-600 hover:text-purple-400 transition-colors"
+                                        title="Rename"
+                                      >
+                                        <Pencil size={12} />
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); handleDelete(chat.chatId) }}
+                                        className="p-1 rounded hover:bg-red-500/20 text-neutral-600 hover:text-red-400 transition-colors"
+                                        title="Delete"
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+
+              {/* Assigned to Me */}
+              {Object.keys(organizedChats.byFileAssigned).length > 0 && isExpanded && (
+                <p className="text-xs text-neutral-600 px-3 mt-4 mb-1 uppercase tracking-wider">Assigned to Me</p>
+              )}
+              {Object.entries(organizedChats.byFileAssigned).map(([fileId, fileData]) => {
+                const isExpanding = expandedFiles.has(fileId)
+                const { file, chats: fileChats } = fileData
+                return (
+                  <div key={fileId} className="mb-2 group">
+                    <div className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-neutral-800/50 transition-all">
+                      <button
+                        onClick={() => toggleFileExpanded(fileId)}
+                        className="p-0 text-neutral-400 hover:text-white"
+                        title="Expand/collapse"
+                      >
+                        <ChevronDown
+                          size={16}
+                          className={`shrink-0 transition-transform ${isExpanding ? '' : '-rotate-90'}`}
+                        />
+                      </button>
+                      <File size={14} className="shrink-0 text-orange-400" />
+                      
+                      <button
+                        onClick={() => {
+                          router.push(`/dashboard/${fileId}`)
+                          setMobileOpen(false)
+                        }}
+                        className={`flex-1 text-left text-sm truncate text-neutral-400 hover:text-white transition-colors ${isExpanded ? '' : 'hidden'}`}
+                        title={file.fileName}
+                      >
+                        {file.fileName}
+                      </button>
+
+                      {/* No delete option for assigned files */}
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleCreateChatInFile(fileId, file.fileName)
+                          }}
+                          className="p-1.5 rounded hover:bg-purple-600/20 text-neutral-400 hover:text-purple-400 transition-colors"
+                          title="Create new chat"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {isExpanding && isExpanded && (
+                      <div className="ml-4 border-l border-neutral-700/50 pl-2">
+                        {fileChats.length === 0 ? (
+                          <p className="text-xs text-neutral-600 px-2 py-1.5">No chats yet</p>
+                        ) : (
+                          fileChats.map((chat) => {
+                            const isActive = chat.chatId === activeChatId
+                            const isRenaming = renamingId === chat.chatId
+                            return (
+                              <div
+                                key={chat.chatId}
+                                className={`group flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all mb-0.5
+                                  ${isActive ? 'bg-purple-600/20 border border-purple-700/40' : 'hover:bg-neutral-900/50'}
+                                `}
+                              >
+                                <MessageSquare
+                                  size={14}
+                                  className={`shrink-0 ${isActive ? 'text-purple-400' : 'text-neutral-600 group-hover:text-purple-400'}`}
+                                />
+                                {isRenaming ? (
+                                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                                    <input
+                                      ref={renameInputRef}
+                                      value={renameValue}
+                                      onChange={(e) => setRenameValue(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') submitRename(chat.chatId)
+                                        if (e.key === 'Escape') cancelRename()
+                                      }}
+                                      className="flex-1 min-w-0 bg-neutral-950 border border-purple-500 rounded-lg px-2 py-0.5 text-xs text-white outline-none"
+                                    />
+                                    <button onClick={() => submitRename(chat.chatId)} className="text-green-400 hover:text-green-300 shrink-0">
+                                      <Check size={13} />
+                                    </button>
+                                    <button onClick={cancelRename} className="text-neutral-500 hover:text-white shrink-0">
+                                      <XIcon size={13} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <Link
+                                      href={`/chat/${chat.chatId}?fileId=${file._id}&fileName=${encodeURIComponent(file.fileName)}`}
+                                      onClick={() => setMobileOpen(false)}
+                                      className={`flex-1 min-w-0 text-sm truncate ${isActive ? 'text-purple-300' : 'text-neutral-500 group-hover:text-white'}`}
+                                      title={chat.title}
+                                    >
+                                      {chat.title}
+                                    </Link>
+                                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); startRename(chat) }}
+                                        className="p-1 rounded hover:bg-neutral-700 text-neutral-600 hover:text-purple-400 transition-colors"
+                                        title="Rename"
+                                      >
+                                        <Pencil size={12} />
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); handleDelete(chat.chatId) }}
+                                        className="p-1 rounded hover:bg-red-500/20 text-neutral-600 hover:text-red-400 transition-colors"
+                                        title="Delete"
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )
+                          })
                         )}
                       </div>
                     )}

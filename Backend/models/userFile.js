@@ -7,6 +7,7 @@ const userFileSchema = new mongoose.Schema(
     s3Key: { type: String, required: true },
     fileSize: { type: Number, required: true },
     fileHash: { type: String, unique: true, sparse: true, index: true }, // SHA256 hash for deduplication
+    assignedTo: [{ type: String }], // Array of emails that have been assigned this file
     uploadedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }

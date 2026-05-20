@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Download, Trash2, Pencil, Check, X, Upload, RefreshCw } from "lucide-react";
+import { Download, Trash2, Pencil, Check, X, Upload, RefreshCw, UserPlus } from "lucide-react";
 import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
@@ -12,6 +12,8 @@ type DocRecord = {
   s3Key: string;
   fileSize: number;
   uploadedAt: string;
+  isOwner?: boolean;
+  assignedTo?: string[];
 };
 
 // Fixed: Explicitly returning Record<string, string> to satisfy TypeScript's HeadersInit requirement
@@ -28,6 +30,10 @@ export default function ProfileFileStoragePage() {
   const [message, setMessage] = useState<string>("");
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState<string>("");
+
+  const [assignModalFile, setAssignModalFile] = useState<DocRecord | null>(null);
+  const [assignEmail, setAssignEmail] = useState("");
+  const [isAssigning, setIsAssigning] = useState(false);
 
   const loadDocs = async () => {
     setIsLoading(true);
@@ -152,6 +158,48 @@ export default function ProfileFileStoragePage() {
     } catch (err) {
       console.error(err);
       setMessage((err as Error).message || "Download failed");
+    }
+  };
+
+  const handleAssign = async () => {
+    if (!assignEmail.trim() || !assignModalFile) return;
+    setIsAssigning(true);
+    try {
+      const res = await fetch(`${API_URL}/api/files/${assignModalFile._id}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ email: assignEmail.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to assign");
+      
+      setAssignModalFile({ ...assignModalFile, assignedTo: data.assignedTo });
+      setAssignEmail("");
+      await loadDocs(); // refresh lists
+    } catch (err) {
+      console.error(err);
+      alert((err as Error).message);
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  const handleRevoke = async (email: string) => {
+    if (!assignModalFile) return;
+    try {
+      const res = await fetch(`${API_URL}/api/files/${assignModalFile._id}/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to revoke");
+      
+      setAssignModalFile({ ...assignModalFile, assignedTo: data.assignedTo });
+      await loadDocs();
+    } catch (err) {
+      console.error(err);
+      alert((err as Error).message);
     }
   };
 
@@ -329,30 +377,47 @@ export default function ProfileFileStoragePage() {
 
                   {editId !== doc._id && (
                     <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => downloadDocument(doc)}
-                        className="p-2 text-gray-500 hover:text-blue-400 transition-colors"
-                        title="Download"
-                      >
-                        <Download size={18} />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditId(doc._id);
-                          setEditName(doc.fileName);
-                        }}
-                        className="p-2 text-gray-500 hover:text-gray-300 transition-colors"
-                        title="Rename"
-                      >
-                        <Pencil size={18} />
-                      </button>
-                      <button
-                        onClick={() => onDelete(doc._id)}
-                        className="p-2 text-gray-500 hover:text-red-500 transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      {doc.isOwner !== false && (
+                        <button
+                          onClick={() => setAssignModalFile(doc)}
+                          className="p-2 text-gray-500 hover:text-purple-400 transition-colors"
+                          title="Share / Assign"
+                        >
+                          <UserPlus size={18} />
+                        </button>
+                      )}
+                      {doc.isOwner === false ? (
+                        <span className="text-xs px-2 py-1 bg-orange-900/30 text-orange-400 rounded border border-orange-800">
+                          Assigned to you
+                        </span>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => downloadDocument(doc)}
+                            className="p-2 text-gray-500 hover:text-blue-400 transition-colors"
+                            title="Download"
+                          >
+                            <Download size={18} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditId(doc._id);
+                              setEditName(doc.fileName);
+                            }}
+                            className="p-2 text-gray-500 hover:text-gray-300 transition-colors"
+                            title="Rename"
+                          >
+                            <Pencil size={18} />
+                          </button>
+                          <button
+                            onClick={() => onDelete(doc._id)}
+                            className="p-2 text-gray-500 hover:text-red-500 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -361,6 +426,66 @@ export default function ProfileFileStoragePage() {
           )}
         </div>
       </div>
+
+      {/* Assignment Modal */}
+      {assignModalFile && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-white">Share / Assign PDF</h3>
+              <button onClick={() => setAssignModalFile(null)} className="text-gray-400 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <p className="text-gray-400 text-sm mb-4">
+              Assign <strong className="text-white">{assignModalFile.fileName}</strong> to another user. 
+              They will receive an email and can chat with the PDF topics (but cannot view the raw file). 
+              <br/>
+              <span className="text-xs text-purple-400">Tip: You can add multiple emails separated by commas or spaces.</span>
+            </p>
+
+            <div className="flex gap-2 mb-6">
+              <input
+                type="email"
+                placeholder="User's email address"
+                value={assignEmail}
+                onChange={e => setAssignEmail(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleAssign()}
+                className="flex-1 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 text-sm"
+              />
+              <button 
+                onClick={handleAssign}
+                disabled={isAssigning || !assignEmail.trim()}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                {isAssigning ? "Assigning..." : "Assign"}
+              </button>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-gray-300 mb-2">Assigned Users</h4>
+              {(!assignModalFile.assignedTo || assignModalFile.assignedTo.length === 0) ? (
+                <p className="text-xs text-gray-500">Not assigned to anyone yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {assignModalFile.assignedTo.map(email => (
+                    <li key={email} className="flex items-center justify-between bg-gray-950 px-3 py-2 rounded border border-gray-800">
+                      <span className="text-sm text-gray-300">{email}</span>
+                      <button 
+                        onClick={() => handleRevoke(email)}
+                        className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                      >
+                        Revoke
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

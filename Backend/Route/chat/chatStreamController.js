@@ -2,6 +2,8 @@ import { model } from "./chatbotGraph.js";
 import ChatMessage from "../../models/chatMessage.js";
 import ChatSession from "../../models/chatSession.js";
 import ChatContext from "../../models/ChatContextSchema.js";
+import Folder from "../../models/FolderSchema.js";
+import Topic from "../../models/topic.js";
 
 import {
   HumanMessage,
@@ -240,6 +242,110 @@ export const chatStreamHandler = async (req, res) => {
       { chatId, userId, role: "user", content: message },
       { chatId, userId, role: "assistant", content: assistantText },
     ]);
+
+    // ─── Score Detection ──────────────────────────────────────────────────
+    // Only attempt scoring when there's a file context (topic-based chat)
+    if (resolvedFileId) {
+      try {
+        const scoreDetectionPrompt = `You are evaluating a student's understanding based on a Q&A exchange.
+
+User message: "${message}"
+AI response: "${assistantText.slice(0, 800)}"
+
+Did this exchange involve the student demonstrating, answering, or being evaluated on knowledge of a specific topic?
+
+If YES, extract the topic name (use the exact topic name from the study material if possible) and assign a score from 0-10 based on:
+- 0-3: No understanding shown or wrong answers
+- 4-6: Partial understanding
+- 7-8: Good understanding  
+- 9-10: Excellent understanding
+
+Return ONLY valid JSON:
+{"hasScore": true, "topicName": "exact topic name", "score": 7, "reason": "brief reason"}
+
+If NO knowledge exchange happened (e.g. just asking for explanation, general questions), return:
+{"hasScore": false}`;
+
+        const scoreResult = await model.invoke([
+          new SystemMessage("You are a strict educational evaluator. Return ONLY valid JSON, no markdown."),
+          new HumanMessage(scoreDetectionPrompt)
+        ]);
+
+        let scoreData = null;
+        try {
+          const raw = scoreResult.content.trim().replace(/```json|```/g, "").trim();
+          scoreData = JSON.parse(raw);
+        } catch (e) {
+          console.log("[Score] Could not parse score JSON:", scoreResult.content);
+        }
+
+        if (scoreData?.hasScore && scoreData.topicName && typeof scoreData.score === "number") {
+          const score = Math.min(10, Math.max(0, scoreData.score));
+          const performanceScore = (score / 10) * 100;
+          const weakFlag = performanceScore < 70;
+
+          // Find topic in DB to get topicId
+          const topicDoc = await Topic.findOne({
+            fileId: resolvedFileId,
+            title: { $regex: scoreData.topicName.trim(), $options: "i" }
+          }).select("_id title").lean();
+
+          const topicName = topicDoc?.title || scoreData.topicName;
+          const topicId = topicDoc?._id?.toString() || null;
+
+          // Upsert the score into FolderSchema
+          const folder = await Folder.findOneAndUpdate(
+            { fileId: resolvedFileId },
+            { $setOnInsert: { userId, fileId: resolvedFileId } },
+            { upsert: true, new: true }
+          );
+
+          const existingTopicIdx = folder.topics.findIndex(
+            (t) => t.topicName?.toLowerCase() === topicName.toLowerCase()
+          );
+
+          const newMark = { score, total: 10, attemptedAt: new Date() };
+
+          if (existingTopicIdx >= 0) {
+            // Add mark to existing topic
+            folder.topics[existingTopicIdx].marks.push(newMark);
+            const allMarks = folder.topics[existingTopicIdx].marks;
+            const avg = allMarks.reduce((s, m) => s + (m.score / m.total) * 100, 0) / allMarks.length;
+            folder.topics[existingTopicIdx].performanceScore = Math.round(avg * 10) / 10;
+            folder.topics[existingTopicIdx].weakFlag = avg < 70;
+          } else {
+            // Add new topic entry
+            folder.topics.push({
+              topicId,
+              topicName,
+              marks: [newMark],
+              performanceScore,
+              weakFlag
+            });
+          }
+
+          await folder.save();
+
+          // Emit scoreUpdate SSE event to frontend
+          const updatedTopic = existingTopicIdx >= 0 ? folder.topics[existingTopicIdx] : folder.topics[folder.topics.length - 1];
+          res.write(`data: ${JSON.stringify({
+            scoreUpdate: {
+              topicName,
+              score,
+              total: 10,
+              performanceScore: updatedTopic.performanceScore,
+              weakFlag: updatedTopic.weakFlag,
+              reason: scoreData.reason
+            }
+          })}\n\n`);
+
+          console.log(`📊 [Score] Saved: "${topicName}" → ${score}/10 (${performanceScore.toFixed(1)}%) | weak: ${weakFlag}`);
+        }
+      } catch (scoreErr) {
+        console.error("[Score] Detection failed:", scoreErr.message);
+        // Non-fatal — don't break the stream
+      }
+    }
 
     // ─── Update ChatSession ─────
     const updatePayload = {

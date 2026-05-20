@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Plus, MessageSquare, Trash2, Pencil, Check, X as XIcon, Loader2, RefreshCw, File, BookOpen, Zap } from "lucide-react";
+import { ArrowLeft, Plus, MessageSquare, Trash2, Pencil, Check, X as XIcon, Loader2, RefreshCw, File, BookOpen, Zap, UserPlus } from "lucide-react";
 import Link from "next/link";
 
 type Chat = {
@@ -38,6 +38,33 @@ export default function FileDashboardPage() {
   const [renameValue, setRenameValue] = useState("");
   const [processingProgress, setProcessingProgress] = useState<ProcessingProgress | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const [fileInfo, setFileInfo] = useState<any>(null);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [assignEmail, setAssignEmail] = useState("");
+  const [isAssigning, setIsAssigning] = useState(false);
+
+  const fetchFileDetails = useCallback(async () => {
+    if (!fileId) return;
+    try {
+      const res = await fetch(`${API_URL}/api/files/${fileId}`, {
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFileInfo(data.file);
+        if (!fileName && data.file.fileName) {
+          setFileName(data.file.fileName);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load file info:", err);
+    }
+  }, [fileId, fileName]);
+
+  useEffect(() => {
+    fetchFileDetails();
+  }, [fetchFileDetails]);
 
   // Poll for processing progress
   useEffect(() => {
@@ -142,26 +169,66 @@ export default function FileDashboardPage() {
     return "from-green-500 to-emerald-500";
   };
 
+  const handleAssign = async () => {
+    if (!assignEmail.trim() || !fileInfo) return;
+    setIsAssigning(true);
+    try {
+      const res = await fetch(`${API_URL}/api/files/${fileInfo._id}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ email: assignEmail.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to assign");
+      
+      setFileInfo({ ...fileInfo, assignedTo: data.assignedTo });
+      setAssignEmail("");
+    } catch (err) {
+      console.error(err);
+      alert((err as Error).message);
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  const handleRevoke = async (email: string) => {
+    if (!fileInfo) return;
+    try {
+      const res = await fetch(`${API_URL}/api/files/${fileInfo._id}/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to revoke");
+      
+      setFileInfo({ ...fileInfo, assignedTo: data.assignedTo });
+    } catch (err) {
+      console.error(err);
+      alert((err as Error).message);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950 flex flex-col">
       {/* Header */}
       <header className="border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-md sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 w-full">
+            <div className="flex items-start gap-4 flex-1 min-w-0">
               <button
                 onClick={() => router.back()}
-                className="p-2 rounded-lg hover:bg-neutral-800 transition-colors text-neutral-400 hover:text-white"
+                className="p-2 mt-1 rounded-lg hover:bg-neutral-800 transition-colors text-neutral-400 hover:text-white shrink-0"
                 title="Go back"
               >
                 <ArrowLeft size={20} />
               </button>
-              <div>
-                <h1 className="text-2xl font-bold text-white truncate">{fileName}</h1>
-                <p className="text-sm text-neutral-400">Chat & Topics Dashboard</p>
+              <div className="flex-1 min-w-0">
+                <h1 className="text-lg md:text-xl font-medium text-white break-words line-clamp-2">{fileName}</h1>
+                <p className="text-sm text-neutral-400 mt-1">Chat & Topics Dashboard</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <Link
                 href={`/topics/${fileId}`}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-semibold transition-all duration-200"
@@ -169,6 +236,16 @@ export default function FileDashboardPage() {
                 <BookOpen size={18} />
                 <span>View Topics</span>
               </Link>
+              {fileInfo?.isOwner !== false && (
+                <button
+                  onClick={() => setIsAssignModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-500 hover:to-teal-700 text-white font-semibold transition-all duration-200"
+                  title="Share / Assign"
+                >
+                  <UserPlus size={18} />
+                  <span>Assign</span>
+                </button>
+              )}
               <button
                 onClick={createNewChat}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-semibold transition-all duration-200"
@@ -325,6 +402,66 @@ export default function FileDashboardPage() {
           )}
         </div>
       </main>
+
+      {/* Assignment Modal */}
+      {isAssignModalOpen && fileInfo && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-white">Share / Assign PDF</h3>
+              <button onClick={() => setIsAssignModalOpen(false)} className="text-gray-400 hover:text-white">
+                <XIcon size={20} />
+              </button>
+            </div>
+            
+            <p className="text-gray-400 text-sm mb-4">
+              Assign <strong className="text-white">{fileInfo.fileName}</strong> to another user. 
+              They will receive an email and can chat with the PDF topics (but cannot view the raw file).
+              <br/>
+              <span className="text-xs text-purple-400">Tip: You can add multiple emails separated by commas or spaces.</span>
+            </p>
+
+            <div className="flex gap-2 mb-6">
+              <input
+                type="email"
+                placeholder="User's email address"
+                value={assignEmail}
+                onChange={e => setAssignEmail(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleAssign()}
+                className="flex-1 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 text-sm"
+              />
+              <button 
+                onClick={handleAssign}
+                disabled={isAssigning || !assignEmail.trim()}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                {isAssigning ? "Assigning..." : "Assign"}
+              </button>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-gray-300 mb-2">Assigned Users</h4>
+              {(!fileInfo.assignedTo || fileInfo.assignedTo.length === 0) ? (
+                <p className="text-xs text-gray-500">Not assigned to anyone yet.</p>
+              ) : (
+                <ul className="space-y-2 max-h-40 overflow-y-auto">
+                  {fileInfo.assignedTo.map((email: string) => (
+                    <li key={email} className="flex items-center justify-between bg-gray-950 px-3 py-2 rounded border border-gray-800">
+                      <span className="text-sm text-gray-300">{email}</span>
+                      <button 
+                        onClick={() => handleRevoke(email)}
+                        className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                      >
+                        Revoke
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

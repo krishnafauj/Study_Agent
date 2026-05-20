@@ -6,6 +6,8 @@ import Topic from "../models/topic.js";
 import { uploadFileToS3, getFileDownloadUrl, deleteFileFromS3 } from "../services/s3Service.js";
 import ProcessingProgress from "../models/processingProgress.js";
 import { processPDFHierarchy, extractFirstPageText, deriveDynamicFileName } from "../services/pdfHierarchyService.js";
+import User from "../models/user.js";
+import { sendAssignmentEmail } from "../services/emailService.js";
 
 const router = Router();
 
@@ -21,12 +23,53 @@ const upload = multer({
   },
 });
 
-// List files for authenticated user
+// List files for authenticated user (owned or assigned)
 router.get("/files", async (req, res) => {
   try {
     const userId = req.user.userId;
-    const files = await UserFile.find({ userId }).sort({ uploadedAt: -1 });
-    res.json({ success: true, files });
+    const email = req.user.email;
+    const files = await UserFile.find({ 
+      $or: [
+        { userId },
+        { assignedTo: email }
+      ]
+    }).sort({ uploadedAt: -1 }).lean();
+
+    const processedFiles = files.map(f => ({
+      ...f,
+      isOwner: f.userId === userId
+    }));
+
+    res.json({ success: true, files: processedFiles });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Get single file details
+router.get("/files/:id", async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const email = req.user.email;
+    const file = await UserFile.findOne({ 
+      _id: req.params.id,
+      $or: [
+        { userId },
+        { assignedTo: email }
+      ]
+    }).lean();
+
+    if (!file) {
+      return res.status(404).json({ success: false, message: "File not found" });
+    }
+
+    const processedFile = {
+      ...file,
+      isOwner: file.userId === userId
+    };
+
+    res.json({ success: true, file: processedFile });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: error.message });
@@ -316,6 +359,66 @@ router.delete("/files/:id", async (req, res) => {
     console.log(`✅ [FILE DELETE] File completely removed from system`);
 
     res.json({ success: true, message: "Deleted" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ─── ASSIGNMENT ROUTES ──────────────────────────────────────────────────
+
+// Assign PDF to emails
+router.post("/files/:id/assign", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+
+    const file = await UserFile.findOne({ _id: req.params.id, userId: req.user.userId });
+    if (!file) return res.status(404).json({ success: false, message: "File not found or unauthorized" });
+
+    // Extract emails using regex (split by space or comma)
+    const emails = email.split(/[\s,]+/).map(e => e.trim()).filter(e => e);
+
+    if (!file.assignedTo) file.assignedTo = [];
+    
+    // Fetch owner details once
+    const owner = await User.findById(req.user.userId);
+    const ownerName = owner ? owner.name : "A user";
+
+    for (const e of emails) {
+      if (!file.assignedTo.includes(e)) {
+        file.assignedTo.push(e);
+        // Send email
+        await sendAssignmentEmail(e, ownerName, file.fileName, file._id).catch(err => {
+          console.error(`Failed to send email to ${e}:`, err.message);
+        });
+      }
+    }
+    
+    await file.save();
+
+    res.json({ success: true, assignedTo: file.assignedTo });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Revoke PDF access
+router.post("/files/:id/revoke", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+
+    const file = await UserFile.findOne({ _id: req.params.id, userId: req.user.userId });
+    if (!file) return res.status(404).json({ success: false, message: "File not found or unauthorized" });
+
+    if (file.assignedTo && file.assignedTo.includes(email)) {
+      file.assignedTo = file.assignedTo.filter(e => e !== email);
+      await file.save();
+    }
+
+    res.json({ success: true, assignedTo: file.assignedTo || [] });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: error.message });

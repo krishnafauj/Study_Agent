@@ -15,6 +15,8 @@ import {
 import authRoutes from "./Auth/auth.js";
 import fileRoutes from "./fileRoutes.js";
 import topicRoutes from "./topicRoutes.js";
+import suggestionRoutes from "./suggestionRoutes.js";
+import recordsRoutes from "./recordsRoutes.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 console.log("Route loaded");
 router.use("/auth", authRoutes);
@@ -27,6 +29,12 @@ router.use(fileRoutes);
 
 // Topic hierarchy endpoints
 router.use(topicRoutes);
+
+// Suggestions endpoints
+router.use(suggestionRoutes);
+
+// Records & performance endpoints
+router.use(recordsRoutes);
 
 // Chat streaming
 router.post("/chat-stream", chatStreamHandler);
