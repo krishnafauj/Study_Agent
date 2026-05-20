@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Search, Loader2, BookOpen, AlertCircle,
-  Play, Map, CreditCard, X, RotateCcw, ZoomIn, ZoomOut, EyeOff
+  Play, Map, CreditCard, X, RotateCcw, ZoomIn, ZoomOut, EyeOff, Eye, Maximize2
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -387,6 +387,7 @@ function FlashCards({ topics }: { topics: Topic[] }) {
   const flat = flattenTopics(topics);
   const [flipped, setFlipped] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedTopic, setExpandedTopic] = useState<Topic | null>(null);
 
   const filtered = searchQuery.trim()
     ? flat.filter(
@@ -405,7 +406,15 @@ function FlashCards({ topics }: { topics: Topic[] }) {
     });
   };
 
-  const unreveallAll = () => setFlipped(new Set());
+  const allFlipped = filtered.length > 0 && flipped.size === filtered.length;
+
+  const toggleRevealAll = () => {
+    if (allFlipped) {
+      setFlipped(new Set());
+    } else {
+      setFlipped(new Set(filtered.map((t) => t._id)));
+    }
+  };
 
   if (flat.length === 0) {
     return (
@@ -436,11 +445,11 @@ function FlashCards({ topics }: { topics: Topic[] }) {
         </span>
 
         <button
-          onClick={unreveallAll}
+          onClick={toggleRevealAll}
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-sm text-neutral-300 hover:text-white transition-all shrink-0"
         >
-          <EyeOff size={14} />
-          Unreveal all
+          {allFlipped ? <EyeOff size={14} /> : <Eye size={14} />}
+          {allFlipped ? "Unreveal all" : "Reveal all"}
         </button>
       </div>
 
@@ -490,9 +499,21 @@ function FlashCards({ topics }: { topics: Topic[] }) {
                         transform: "rotateY(180deg)",
                       }}
                     >
-                      <h3 className="text-xs font-bold text-white mb-2 line-clamp-1">
-                        {topic.title}
-                      </h3>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <h3 className="text-xs font-bold text-white line-clamp-2">
+                          {topic.title}
+                        </h3>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedTopic(topic);
+                          }}
+                          className="p-1.5 -mr-1.5 -mt-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+                          title="View details"
+                        >
+                          <Maximize2 size={14} />
+                        </button>
+                      </div>
                       {topic.summary && (
                         <p className="text-xs text-neutral-300 leading-relaxed line-clamp-5">
                           {topic.summary}
@@ -531,6 +552,78 @@ function FlashCards({ topics }: { topics: Topic[] }) {
           </div>
         )}
       </div>
+
+      {/* Expanded Topic Modal */}
+      {expandedTopic && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            className="bg-neutral-900 border border-neutral-700 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-800 shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold px-2 py-1 bg-purple-600/20 text-purple-400 rounded-md uppercase tracking-wide">
+                  Level {expandedTopic.level}
+                </span>
+                <h2 className="text-lg font-bold text-white line-clamp-1">{expandedTopic.title}</h2>
+              </div>
+              <button
+                onClick={() => setExpandedTopic(null)}
+                className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-5 space-y-6">
+              {expandedTopic.summary && (
+                <div>
+                  <h3 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-2">
+                    Summary
+                  </h3>
+                  <p className="text-neutral-200 leading-relaxed whitespace-pre-wrap text-sm">
+                    {expandedTopic.summary}
+                  </p>
+                </div>
+              )}
+              
+              {expandedTopic.content && (
+                <div>
+                  <h3 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-2">
+                    Content
+                  </h3>
+                  <p className="text-neutral-300 leading-relaxed whitespace-pre-wrap text-sm">
+                    {expandedTopic.content}
+                  </p>
+                </div>
+              )}
+              
+              {expandedTopic.children && expandedTopic.children.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-3">
+                    Subtopics ({expandedTopic.children.length})
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {expandedTopic.children.map((child) => (
+                      <div
+                        key={child._id}
+                        className="p-3 bg-neutral-800/50 border border-neutral-700/50 rounded-xl"
+                      >
+                        <h4 className="text-sm font-bold text-neutral-200 mb-1">{child.title}</h4>
+                        {child.summary && (
+                          <p className="text-xs text-neutral-400 line-clamp-2">
+                            {child.summary}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

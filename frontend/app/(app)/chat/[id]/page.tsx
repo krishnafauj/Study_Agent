@@ -272,6 +272,13 @@ export default function ChatPage() {
                             assistantText += parsed.text;
                             setStreamingText(assistantText);
                         }
+
+                        if (typeof parsed.title === "string") {
+                            setChatTitle(parsed.title);
+                            window.dispatchEvent(
+                                new CustomEvent("chatTitleUpdated", { detail: { chatId: id, title: parsed.title } })
+                            );
+                        }
                     } catch {
                         // Legacy plain-text fallback (shouldn't happen with new backend)
                         if (raw === "[DONE]") {

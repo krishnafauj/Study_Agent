@@ -5,7 +5,7 @@ import UserFile from "../models/userFile.js";
 import Topic from "../models/topic.js";
 import { uploadFileToS3, getFileDownloadUrl, deleteFileFromS3 } from "../services/s3Service.js";
 import ProcessingProgress from "../models/processingProgress.js";
-import { processPDFHierarchy } from "../services/pdfHierarchyService.js";
+import { processPDFHierarchy, extractFirstPageText, deriveDynamicFileName } from "../services/pdfHierarchyService.js";
 
 const router = Router();
 
@@ -44,6 +44,12 @@ router.post("/files/upload", upload.single("file"), async (req, res) => {
     const fileHash = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
     console.log(`✅ [DEDUP] Hash: ${fileHash}`);
 
+    // Dynamic naming
+    console.log(`\n📋 [NAMING] Extracting text to derive dynamic name...`);
+    const firstPageText = await extractFirstPageText(req.file.buffer);
+    const dynamicFileName = deriveDynamicFileName(firstPageText, req.file.originalname);
+    console.log(`✅ [NAMING] Derived name: ${dynamicFileName}`);
+
     // Step 2: Check if this file already exists in DB
     console.log(`🔍 [DEDUP] Checking database for duplicate...`);
     const existingFile = await UserFile.findOne({ fileHash });
@@ -55,7 +61,7 @@ router.post("/files/upload", upload.single("file"), async (req, res) => {
       // Create a new UserFile entry that references the same topics
       const userFile = await UserFile.create({
         userId,
-        fileName: req.file.originalname,
+        fileName: dynamicFileName, // Use dynamic name instead of existing or original
         s3Key: existingFile.s3Key, // Reuse S3 key
         fileSize: req.file.size,
         fileHash, // Store the hash
@@ -110,10 +116,10 @@ router.post("/files/upload", upload.single("file"), async (req, res) => {
 
     // Step 3: New file - proceed with full processing
     console.log(`🆕 [DEDUP] This is a new file, proceeding with full processing...`);
-    const key = await uploadFileToS3(req.file.buffer, req.file.originalname, userId);
+    const key = await uploadFileToS3(req.file.buffer, dynamicFileName, userId);
     const userFile = await UserFile.create({
       userId,
-      fileName: req.file.originalname,
+      fileName: dynamicFileName,
       s3Key: key,
       fileSize: req.file.size,
       fileHash, // Store the hash for future deduplication

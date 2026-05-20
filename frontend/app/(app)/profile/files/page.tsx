@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Download, Trash2, Pencil, Check, X, Upload, RefreshCw } from "lucide-react";
+import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
@@ -318,12 +319,12 @@ export default function ProfileFileStoragePage() {
                       </button>
                     </div>
                   ) : (
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-medium truncate">{doc.fileName}</p>
+                    <Link href={`/dashboard/${doc._id}`} className="flex-1 min-w-0 group cursor-pointer">
+                      <p className="text-white font-medium truncate group-hover:text-blue-400 transition-colors">{doc.fileName}</p>
                       <p className="text-gray-500 text-xs mt-1">
                         {new Date(doc.uploadedAt).toLocaleDateString()} • {((doc.fileSize || 0) / 1024 / 1024).toFixed(2)} MB
                       </p>
-                    </div>
+                    </Link>
                   )}
 
                   {editId !== doc._id && (

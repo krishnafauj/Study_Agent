@@ -199,6 +199,22 @@ export const chatStreamHandler = async (req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
+    // ─── Generate Title Asynchronously (if first message) ─────────────────
+    const isFirstMessage = context.recentMessages.length === 0;
+    let titlePromise = null;
+    if (isFirstMessage) {
+      titlePromise = model.invoke([
+        new SystemMessage("You are a helpful assistant. Provide a short, relevant title (3 to 5 words) for a chat that starts with the following message. Respond ONLY with the title text."),
+        new HumanMessage(message)
+      ]).then(res => {
+        const title = res.content.trim().replace(/^["']|["']$/g, "");
+        return title;
+      }).catch(err => {
+        console.error("Failed to generate title:", err);
+        return null;
+      });
+    }
+
     // ─── Stream LLM response ──────────────────────────────────────────────
     const stream = await model.stream(messages);
     let assistantText = "";
@@ -210,22 +226,37 @@ export const chatStreamHandler = async (req, res) => {
       res.write(`data: ${JSON.stringify({ text: token })}\n\n`);
     }
 
+    // ─── Send Title if generated ──────────────────────────────────────────
+    let finalTitle = null;
+    if (titlePromise) {
+      finalTitle = await titlePromise;
+      if (finalTitle) {
+        res.write(`data: ${JSON.stringify({ title: finalTitle })}\n\n`);
+      }
+    }
+
     // ─── Save messages ────────────────────────────────────────────────────
     await ChatMessage.insertMany([
       { chatId, userId, role: "user", content: message },
       { chatId, userId, role: "assistant", content: assistantText },
     ]);
 
-    // ─── Update ChatSession (upsert, set title only on first message) ─────
+    // ─── Update ChatSession ─────
+    const updatePayload = {
+      $setOnInsert: {
+        ...(contextFileId && { fileId: contextFileId }),
+        ...(folderId && { folderId }),
+      }
+    };
+    if (finalTitle) {
+      updatePayload.$set = { title: finalTitle };
+    } else if (isFirstMessage) {
+      updatePayload.$setOnInsert.title = message.trim().slice(0, 60);
+    }
+
     await ChatSession.findOneAndUpdate(
       { chatId, userId },
-      {
-        $setOnInsert: {
-          title: message.trim().slice(0, 60),
-          ...(contextFileId && { fileId: contextFileId }),
-          ...(folderId && { folderId }),
-        },
-      },
+      updatePayload,
       { upsert: true, new: true }
     );
 
