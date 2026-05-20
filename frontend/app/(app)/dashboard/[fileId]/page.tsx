@@ -175,7 +175,7 @@ export default function FileDashboardPage() {
     try {
       const res = await fetch(`${API_URL}/api/files/${fileInfo._id}/assign`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: authHeaders(),
         body: JSON.stringify({ email: assignEmail.trim() }),
       });
       const data = await res.json();
@@ -196,7 +196,7 @@ export default function FileDashboardPage() {
     try {
       const res = await fetch(`${API_URL}/api/files/${fileInfo._id}/revoke`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+       headers: authHeaders(),
         body: JSON.stringify({ email }),
       });
       const data = await res.json();
