@@ -225,7 +225,7 @@ export default function ProfileFileStoragePage() {
   const totalSize = useMemo(() => docs.reduce((sum, d) => sum + (d.fileSize || 0), 0), [docs]);
 
   return (
-    <div className="min-h-screen bg-black p-4 sm:p-8">
+    <div className="h-full overflow-y-auto bg-black p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">

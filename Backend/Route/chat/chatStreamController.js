@@ -14,17 +14,28 @@ import {
 import {
   getFolderContext,
   getWeakTopics,
-  getRagContext
+  getStructuredContext
 } from "../../services/studyContextService.js";
+
+import { getScopedGraphContext } from "../../services/scopedRetrievalService.js";
+import UserFile from "../../models/userFile.js";
+import SectionGrant from "../../models/sectionGrant.js";
+import PermissionSection from "../../models/permissionSection.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Build topic-scoped system prompt from direct DB queries
+//
+// `userId` / `userEmail` identify the caller. A non-owner who chats via a
+// SectionGrant is scoped to their approved page ranges (getScopedGraphContext),
+// which may borrow out-of-range prerequisites from the knowledge graph WITHOUT
+// overcrossing. The file owner keeps the original full-file behaviour.
 // ─────────────────────────────────────────────────────────────────────────────
-async function buildSystemPrompt({ message, fileId, conversationSummary }) {
+async function buildSystemPrompt({ message, fileId, conversationSummary, userId, userEmail }) {
 
   let topicsBlock = "";
   let weakBlock = "";
   let ragBlock = "";
+  let prereqBlock = "";
 
   if (fileId) {
 
@@ -74,14 +85,71 @@ async function buildSystemPrompt({ message, fileId, conversationSummary }) {
         : `\n## Topics Needing Attention (Under 70%)\n${weakLines}\n`;
     }
 
-    // 3. RAG — relevant chunks for this message
-    const chunks = await getRagContext(message, fileId, 4);
+    // 3. RAG — scoped for granted (non-owner) users, full for the owner.
+    let chunks = [];
+    let mode = "vector";
+
+    const file = await UserFile.findById(fileId).select("userId").lean();
+    const isOwner = file && String(file.userId) === String(userId);
+
+    if (file && !isOwner) {
+      // Non-owner: allowed only through an active SectionGrant, scoped to its pages.
+      const email = userEmail ? String(userEmail).toLowerCase() : null;
+      const grant = await SectionGrant.findOne({
+        fileId: String(fileId),
+        status: "active",
+        $or: [
+          ...(email ? [{ grantedToEmail: email }] : []),
+          { grantedToUserId: String(userId) },
+        ],
+      }).lean();
+
+      if (grant) {
+        // Only "assign"-mode sections are parsed into chat; "see" sections are
+        // view-only and never fed to the model.
+        const assignIds = (grant.sections || [])
+          .filter((s) => s.mode === "assign")
+          .map((s) => s.sectionId);
+        const secs = await PermissionSection.find({ _id: { $in: assignIds } })
+          .select("pageStart pageEnd")
+          .lean();
+        const scoped = await getScopedGraphContext(
+          message,
+          fileId,
+          secs.map((s) => ({ pageStart: s.pageStart, pageEnd: s.pageEnd })),
+          { limit: 6, prereqCap: 3 }
+        );
+        chunks = scoped.primary;
+        mode = `scoped:${scoped.mode}`;
+
+        if (scoped.prerequisites.length > 0) {
+          const pr = scoped.prerequisites
+            .map((p, i) => `[Background ${i + 1}] ${p.title}: ${p.definition}`)
+            .join("\n");
+          // Borrowed from earlier in the book — reference only, clearly separated.
+          prereqBlock =
+            `\n## Background from earlier in the book (reference only — do NOT expand beyond the student's approved sections)\n${pr}\n`;
+        }
+      }
+      // No grant ⇒ chunks stays [] ⇒ the existing "no context" rules apply.
+    } else {
+      // Owner (or file lookup failed): original full-file behaviour.
+      const r = await getStructuredContext(message, fileId, 6);
+      chunks = r.chunks;
+      mode = r.mode;
+    }
 
     if (chunks.length > 0) {
       const chunkText = chunks
-        .map((c, i) => `[Source ${i + 1}] ${c.title}\n${c.summary || c.content || ""}`)
+        .map((c, i) => {
+          const tags = [c.number, c.contentType, c.pageStart ? `p.${c.pageStart}` : ""]
+            .filter(Boolean)
+            .join(" \u00b7 ");
+          return `[Source ${i + 1}${tags ? " \u00b7 " + tags : ""}] ${c.title}\n${c.content || ""}`;
+        })
         .join("\n\n");
       ragBlock = `\n## Relevant Content from Student's Documents\n${chunkText}\n`;
+      console.log(`[RAG] mode=${mode} sources=${chunks.length}`);
     }
   }
 
@@ -95,7 +163,8 @@ async function buildSystemPrompt({ message, fileId, conversationSummary }) {
 2. If asked about something outside these topics, redirect: "That topic isn't in your current study material. Would you like to explore one of your uploaded topics instead?"
 3. When the student asks "what should I study?" or "suggest topics", recommend from the "Topics Needing Attention" section.
 4. Always use the "Relevant Content" section to ground your answers in the actual study material.
-5. Be specific, concise, and educationally focused.
+5. If the student asks for the chapter/topic list, reproduce the outline in the "Topics" section above EXACTLY (with its numbers). NEVER invent, guess, or estimate chapters that are not listed.
+6. Be specific, concise, and educationally focused.
 `
     : `
 ## YOUR RULES
@@ -108,6 +177,7 @@ You are a helpful study assistant. Answer the student's questions clearly and co
     topicsBlock,
     weakBlock,
     ragBlock,
+    prereqBlock,
     rules,
   ]
     .filter(Boolean)
@@ -180,6 +250,8 @@ export const chatStreamHandler = async (req, res) => {
       message,
       fileId: resolvedFileId,
       conversationSummary: context.summary,
+      userId,                    // caller identity — decides owner vs. scoped path
+      userEmail: req.user?.email, // may be undefined; falls back to grantedToUserId
     });
 
     console.log(`🧠 System prompt built (${systemPromptText.length} chars) | Has context: ${resolvedFileId ? "YES — " + resolvedFileId : "NO"}`);

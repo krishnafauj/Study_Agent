@@ -1,0 +1,12 @@
+node_modules
+integration/node_modules
+npm-debug.log
+.git
+.env
+**/__pycache__
+*.pyc
+# leftover scratch/test files
+_*.mjs
+integration/_smoke.mjs
+integration/err.txt
+integration/PACKAG~1.JSO

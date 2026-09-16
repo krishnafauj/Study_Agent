@@ -5,7 +5,8 @@ import UserFile from "../models/userFile.js";
 import Topic from "../models/topic.js";
 import { uploadFileToS3, getFileDownloadUrl, deleteFileFromS3 } from "../services/s3Service.js";
 import ProcessingProgress from "../models/processingProgress.js";
-import { processPDFHierarchy, extractFirstPageText, deriveDynamicFileName } from "../services/pdfHierarchyService.js";
+import { extractFirstPageText, deriveDynamicFileName } from "../services/namingService.js";
+import { processBuffer } from "../integration/src/pipeline.js";
 import User from "../models/user.js";
 import { sendAssignmentEmail } from "../services/emailService.js";
 
@@ -114,22 +115,38 @@ router.post("/files/upload", upload.single("file"), async (req, res) => {
 
       // Copy topics from existing file to this new file entry
       console.log(`📋 [DEDUP] Copying topics to new file entry...`);
-      const existingTopics = await Topic.find({ fileId: existingFile._id });
-      const copiedTopics = await Promise.all(
-        existingTopics.map(topic => 
-          Topic.create({
-            fileId: userFile._id,
-            userId,
-            level: topic.level,
-            parentTopicId: topic.parentTopicId, // Maintain hierarchy
-            title: topic.title,
-            summary: topic.summary,
-            content: topic.content,
-            embedding: topic.embedding,
-            order: topic.order,
-          })
-        )
-      );
+      const existingTopics = await Topic.find({ fileId: existingFile._id }).lean();
+      // Pass 1: create copies and map old _id -> new _id
+      const idMap = new Map();
+      const created = [];
+      for (const t of existingTopics) {
+        const nt = await Topic.create({
+          fileId: userFile._id,
+          userId,
+          level: t.level,
+          parentTopicId: null, // fixed in pass 2
+          title: t.title,
+          summary: t.summary,
+          content: t.content,
+          embedding: t.embedding,
+          order: t.order,
+          number: t.number || "",
+          contentType: t.contentType || "",
+          isChunk: t.isChunk || false,
+          pageStart: t.pageStart || 0,
+          pageEnd: t.pageEnd || 0,
+        });
+        idMap.set(String(t._id), nt._id);
+        created.push({ nt, oldParent: t.parentTopicId });
+      }
+      // Pass 2: remap parent links to the NEW copies (was pointing at the original file's ids)
+      for (const { nt, oldParent } of created) {
+        if (oldParent && idMap.has(String(oldParent))) {
+          nt.parentTopicId = idMap.get(String(oldParent));
+          await nt.save();
+        }
+      }
+      const copiedTopics = created;
       console.log(`✅ [DEDUP] Copied ${copiedTopics.length} topics`);
 
       // Mark as completed immediately since we reused
@@ -191,7 +208,7 @@ router.post("/files/upload", upload.single("file"), async (req, res) => {
         
         // Progress callback for auto-processing
         const progressCallback = async (data) => {
-          console.log(`⏳ [AUTO-PROCESS] ${data.status} - Progress: ${data.progress}/10 - ${data.message || ""}`);
+          console.log(`⏳ [AUTO-PROCESS] ${data.status} - Progress: ${data.progress}% - ${data.message || ""}`);
           await ProcessingProgress.updateOne(
             { fileId: userFile._id },
             {
@@ -203,54 +220,87 @@ router.post("/files/upload", upload.single("file"), async (req, res) => {
         };
         
         // 🚨 FIX: Await the hierarchy processor to get the results back!
-        console.log(`⏳ [UPLOAD] Calling processPDFHierarchy...`);
-        const result = await processPDFHierarchy(
-          key, 
-          userFile.fileName, 
-          userFile._id.toString(), 
-          userId, 
-          progressCallback
-        );
+        console.log(`⏳ [UPLOAD] Calling processBuffer...`);
+        const result = await processBuffer(req.file.buffer, {
+          fileName: userFile.fileName,
+          refineOutline: true,
+          useLlmContentType: true,
+          embed: true,
+          progress: progressCallback
+        });
 
-        console.log(`✅ [UPLOAD] processPDFHierarchy returned ${result.totalTopics} topics`);
+        console.log(`✅ [UPLOAD] processBuffer returned ${result.stats.totalChunks} chunks`);
 
         // 🚨 FIX: Actually save the results to MongoDB!
         console.log(`\n💾 [UPLOAD-DB] Starting database insertion...`);
-        const insertTopics = async (topics, parentId = null, level = 0) => {
-          let inserted = 0;
-          for (const topic of topics) {
+        let inserted = 0;
+        const nodeMap = new Map();
+
+        const insertOutline = async (nodes, parentId = null) => {
+          for (const node of nodes) {
             try {
-              console.log(`  📝 [UPLOAD-DB] Creating: "${topic.title}" (level: ${level})`);
-              
+              console.log(`  📝 [UPLOAD-DB] Creating outline node: "${node.title}" (level: ${node.level})`);
               const newTopic = await Topic.create({
                 fileId: userFile._id,
                 userId,
-                level: topic.level,
+                level: node.level,
                 parentTopicId: parentId,
-                title: topic.title,
-                summary: topic.summary,
-                content: topic.content,
-                embedding: topic.embedding || [],
-                order: topic.order,
+                title: node.title,
+                summary: node.summary || "",
+                content: node.title, // Outline nodes don't have large text
+                keyConcepts: node.keyConcepts || [],
+                formulas: node.formulas || [],
+                mcqs: node.mcqs || [],
+                embedding: [],
+                order: inserted,
+                number: node.number || "",
+                isChunk: false,
+                pageStart: node.pageStart || 0,
+                pageEnd: node.pageEnd || 0,
               });
-
-              console.log(`  ✅ [UPLOAD-DB] Stored: "${newTopic.title}" (ID: ${newTopic._id})`);
+              nodeMap.set(node.id, newTopic._id);
               inserted++;
 
-              // Process children recursively
-              if (topic.children && topic.children.length > 0) {
-                const childCount = await insertTopics(topic.children, newTopic._id, level + 1);
-                inserted += childCount;
+              if (node.children && node.children.length > 0) {
+                await insertOutline(node.children, newTopic._id);
               }
-            } catch (topicErr) {
-              console.error(`  ❌ [UPLOAD-DB] Failed to insert "${topic.title}": ${topicErr.message}`);
+            } catch (err) {
+              console.error(`  ❌ [UPLOAD-DB] Failed to insert outline "${node.title}": ${err.message}`);
             }
           }
-          return inserted;
+        };
+
+        const insertChunks = async (chunks) => {
+          for (const chunk of chunks) {
+            try {
+              const parentId = nodeMap.get(chunk.nodeId) || null;
+              // Make chunks a child of their corresponding outline node
+              const newTopic = await Topic.create({
+                fileId: userFile._id,
+                userId,
+                level: 99, // Distinguishes leaf chunks from structural nodes
+                parentTopicId: parentId,
+                title: chunk.title || "Content Chunk",
+                summary: chunk.kind || "text",
+                content: chunk.text,
+                embedding: chunk.embedding || [],
+                order: inserted,
+                isChunk: true,
+                contentType: chunk.contentType || "",
+                pageStart: chunk.pageStart || 0,
+                pageEnd: chunk.pageEnd || 0,
+              });
+              inserted++;
+            } catch (err) {
+              console.error(`  ❌ [UPLOAD-DB] Failed to insert chunk: ${err.message}`);
+            }
+          }
         };
 
         // Execute the save
-        const totalSaved = await insertTopics(result.topics);
+        await insertOutline(result.outline);
+        await insertChunks(result.chunks);
+        const totalSaved = inserted;
         console.log(`✅ [UPLOAD-DB] Saved ${totalSaved} topics to MongoDB\n`);
 
         // Mark progress as fully completed
@@ -258,16 +308,16 @@ router.post("/files/upload", upload.single("file"), async (req, res) => {
           { fileId: userFile._id },
           {
             status: "completed",
-            progress: 10,
-            totalTopics: result.totalTopics,
-            topicsCreated: result.totalTopics,
+            progress: 100,
+            totalTopics: totalSaved,
+            topicsCreated: totalSaved,
             completedAt: new Date(),
           }
         );
 
         console.log(`\n${"=".repeat(80)}`);
         console.log(`✅ [UPLOAD] PDF Processing Complete!`);
-        console.log(`📊 Total Topics: ${result.totalTopics}`);
+        console.log(`📊 Total Chunks: ${result.stats.totalChunks}`);
         console.log(`💾 Total Saved: ${totalSaved}`);
         console.log(`${"=".repeat(80)}\n`);
 

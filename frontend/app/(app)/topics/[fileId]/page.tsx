@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Search, Loader2, BookOpen, AlertCircle,
-  Play, Map, CreditCard, X, RotateCcw, ZoomIn, ZoomOut, EyeOff, Eye, Maximize2
+  Play, Map, CreditCard, X, RotateCcw, ZoomIn, ZoomOut, EyeOff, Eye, Maximize2, ChevronRight, ChevronDown, List
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -12,11 +12,57 @@ type Topic = {
   _id: string;
   title: string;
   level: number;
+  number?: string;        // dotted section number: "1", "3.1"
+  isChunk?: boolean;      // true = leaf content chunk (not a section/card)
+  contentType?: string;   // definition | example | mcq | table | ...
   summary: string;
   content: string;
   order: number;
+  keyConcepts?: { concept: string; definition: string }[];
+  formulas?: { name: string; expression: string; explanation: string }[];
+  mcqs?: { question: string; options: string[]; correctAnswer: string; explanation: string }[];
   children?: Topic[];
 };
+
+// A node is a leaf content-chunk (not a structural section) — supports older
+// data where the flag is absent by falling back to the level-99 sentinel.
+const isChunkNode = (t: Topic) => t.isChunk === true || t.level >= 99;
+
+// Natural sort by dotted section number ("2" < "10", "3.1" < "3.2"), order fallback.
+function cmpByNumber(a: Topic, b: Topic): number {
+  const pa = (a.number || "").split(".").map((n) => parseInt(n, 10));
+  const pb = (b.number || "").split(".").map((n) => parseInt(n, 10));
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const x = Number.isFinite(pa[i]) ? pa[i] : -1;
+    const y = Number.isFinite(pb[i]) ? pb[i] : -1;
+    if (x !== y) return x - y;
+  }
+  return (a.order ?? 0) - (b.order ?? 0);
+}
+
+// Merge each section's chunk-children text into the section as its content,
+// and drop chunk nodes from the display tree (used by both Mind Map & Flash Cards).
+function prepareTree(list: Topic[]): Topic[] {
+  return (list || [])
+    .filter((t) => !isChunkNode(t))
+    .map((t) => {
+      const kids = t.children || [];
+      const chunkText = kids
+        .filter(isChunkNode)
+        .map((c) => c.content)
+        .filter(Boolean)
+        .join("\n\n");
+      const structChildren = prepareTree(kids);
+      const hasRealContent = t.content && t.content !== t.title;
+      return {
+        ...t,
+        content: chunkText || (hasRealContent ? t.content : ""),
+        children: structChildren,
+      };
+    })
+    .sort(cmpByNumber);
+}
 
 type Progress = {
   status: string;
@@ -142,8 +188,68 @@ function TopicPanel({
           </div>
         )}
 
-        {topic.children && topic.children.length > 0 && (
+        {topic.keyConcepts && topic.keyConcepts.length > 0 && (
           <div>
+            <p className="text-xs font-semibold text-purple-500 uppercase tracking-wide mb-2 flex items-center gap-2">
+              <BookOpen size={14} /> Key Concepts
+            </p>
+            <ul className="space-y-2">
+              {topic.keyConcepts.map((kc, i) => (
+                <li key={i} className="bg-neutral-800 p-2.5 rounded-lg border border-neutral-700/50">
+                  <span className="font-semibold text-purple-300 block text-sm">{kc.concept}</span>
+                  <span className="text-sm text-neutral-400 mt-1 block">{kc.definition}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {topic.formulas && topic.formulas.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide mb-2 flex items-center gap-2">
+              <BookOpen size={14} /> Important Formulas
+            </p>
+            <ul className="space-y-2">
+              {topic.formulas.map((f, i) => (
+                <li key={i} className="bg-neutral-800 p-2.5 rounded-lg border border-neutral-700/50">
+                  <span className="font-bold text-blue-300 text-sm">{f.name}</span>
+                  <div className="bg-neutral-900 font-mono text-center py-2 my-1.5 rounded text-neutral-200 text-sm overflow-x-auto whitespace-nowrap px-2">
+                    {f.expression}
+                  </div>
+                  <span className="text-xs text-neutral-400">{f.explanation}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {topic.mcqs && topic.mcqs.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wide mb-2 flex items-center gap-2">
+              <BookOpen size={14} /> Exam Questions
+            </p>
+            <div className="space-y-3">
+              {topic.mcqs.map((mcq, i) => (
+                <div key={i} className="bg-neutral-800 p-3 rounded-lg border border-emerald-900/30">
+                  <p className="text-sm font-medium text-emerald-100 mb-2">{i + 1}. {mcq.question}</p>
+                  <div className="space-y-1 mb-2">
+                    {mcq.options.map((opt, j) => (
+                      <div key={j} className={`text-xs p-1.5 rounded ${opt === mcq.correctAnswer ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-800/50' : 'text-neutral-400'}`}>
+                        {String.fromCharCode(65 + j)}. {opt}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-neutral-500 italic mt-2 border-t border-neutral-700 pt-2">
+                    <span className="font-semibold text-neutral-400">Explanation:</span> {mcq.explanation}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {topic.children && topic.children.length > 0 && (
+          <div className="pt-2">
             <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
               Subtopics ({topic.children.length})
             </p>
@@ -381,249 +487,119 @@ function MindMap({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FLASH CARDS COMPONENT  (4-per-row grid, individual flip, unreveal all)
+// BOOK VIEW COMPONENT (Table of Contents Style)
 // ─────────────────────────────────────────────────────────────────────────────
-function FlashCards({ topics }: { topics: Topic[] }) {
-  const flat = flattenTopics(topics);
-  const [flipped, setFlipped] = useState<Set<string>>(new Set());
+
+function BookNode({ topic, depth = 0, searchQuery = "" }: { topic: Topic; depth?: number; searchQuery?: string }) {
+  const [expanded, setExpanded] = useState(depth === 0);
+  
+  // Force expand if search query matches something inside
+  useEffect(() => {
+    if (searchQuery) setExpanded(true);
+  }, [searchQuery]);
+
+  const hasChildren = topic.children && topic.children.length > 0;
+  
+  const matchesSearch = searchQuery && (
+    topic.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (topic.summary && topic.summary.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    (topic.content && topic.content.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  return (
+    <div className="flex flex-col">
+      <div 
+        className={`flex items-start gap-3 py-3 px-3 hover:bg-neutral-800/40 rounded-xl transition-all cursor-pointer ${depth === 0 ? 'bg-neutral-900/60 border border-neutral-800/80 mb-3 shadow-sm' : 'mb-1'} ${matchesSearch ? 'ring-1 ring-purple-500/50 bg-purple-900/10' : ''}`}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className={`mt-1 shrink-0 text-neutral-500 transition-transform duration-200 ${expanded && hasChildren ? 'rotate-90' : ''}`}>
+          {hasChildren ? (
+            <ChevronRight size={16} className={depth === 0 ? "text-purple-400" : ""} />
+          ) : (
+            <div className="w-4" />
+          )}
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className={`font-semibold tracking-tight ${depth === 0 ? 'text-lg text-white' : depth === 1 ? 'text-base text-neutral-200' : 'text-sm text-neutral-300'}`}>
+              {topic.title}
+            </h3>
+            {topic.level !== undefined && (
+              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/50">
+                Lvl {topic.level}
+              </span>
+            )}
+          </div>
+          {expanded && topic.summary && (
+            <p className="text-sm text-neutral-400 mt-2 leading-relaxed border-l-2 border-purple-500/30 pl-3 py-1 bg-neutral-900/30 rounded-r-lg">{topic.summary}</p>
+          )}
+          {expanded && !topic.summary && topic.content && (
+            <p className="text-sm text-neutral-400 mt-2 leading-relaxed line-clamp-4 border-l-2 border-neutral-700 pl-3 py-1 bg-neutral-900/30 rounded-r-lg">{topic.content}</p>
+          )}
+        </div>
+      </div>
+      
+      {expanded && hasChildren && (
+        <div className={`ml-6 pl-3 border-l border-neutral-800/60 flex flex-col ${depth === 0 ? 'mt-2 mb-4' : 'mt-1 mb-2'}`}>
+          {topic.children!.map((child) => (
+            <BookNode key={child._id} topic={child} depth={depth + 1} searchQuery={searchQuery} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BookView({ topics }: { topics: Topic[] }) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [expandedTopic, setExpandedTopic] = useState<Topic | null>(null);
 
-  const filtered = searchQuery.trim()
-    ? flat.filter(
-        (t) =>
-          t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          t.summary?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : flat;
-
-  const toggleCard = (id: string) => {
-    setFlipped((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const allFlipped = filtered.length > 0 && flipped.size === filtered.length;
-
-  const toggleRevealAll = () => {
-    if (allFlipped) {
-      setFlipped(new Set());
-    } else {
-      setFlipped(new Set(filtered.map((t) => t._id)));
-    }
-  };
-
-  if (flat.length === 0) {
+  if (topics.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-neutral-500">
-        <CreditCard size={40} className="mb-3 opacity-30" />
-        <p>No topics to show flash cards for.</p>
+        <BookOpen size={40} className="mb-3 opacity-30" />
+        <p>No topics available to display.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-neutral-950">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800 shrink-0">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800 shrink-0 bg-neutral-900/50">
         <div className="relative flex-1 max-w-sm">
           <Search size={14} className="absolute left-3 top-3 text-neutral-500" />
           <input
             type="text"
-            placeholder="Search cards..."
+            placeholder="Search Table of Contents..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-neutral-900 border border-neutral-700 rounded-xl text-white text-sm placeholder-neutral-600 focus:border-purple-500 outline-none"
+            className="w-full pl-9 pr-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-white text-sm placeholder-neutral-600 focus:border-purple-500 outline-none transition-colors"
           />
         </div>
-
-        <span className="text-sm text-neutral-500 shrink-0">
-          {filtered.length} card{filtered.length !== 1 ? "s" : ""}
-        </span>
-
-        <button
-          onClick={toggleRevealAll}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-sm text-neutral-300 hover:text-white transition-all shrink-0"
-        >
-          {allFlipped ? <EyeOff size={14} /> : <Eye size={14} />}
-          {allFlipped ? "Unreveal all" : "Reveal all"}
-        </button>
       </div>
 
-      {/* Grid — 4 columns */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {filtered.length === 0 ? (
-          <div className="flex items-center justify-center h-40 text-neutral-500 text-sm">
-            No cards match your search.
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filtered.map((topic) => {
-              const isFlipped = flipped.has(topic._id);
-              return (
-                <div
-                  key={topic._id}
-                  className="cursor-pointer"
-                  style={{ perspective: "1000px", height: 200 }}
-                  onClick={() => toggleCard(topic._id)}
-                >
-                  <div
-                    className="relative w-full h-full transition-transform duration-500"
-                    style={{
-                      transformStyle: "preserve-3d",
-                      transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)",
-                    }}
-                  >
-                    {/* Front */}
-                    <div
-                      className="absolute inset-0 rounded-2xl border border-neutral-700 bg-gradient-to-br from-neutral-900 to-neutral-800 flex flex-col items-center justify-center p-4 text-center"
-                      style={{ backfaceVisibility: "hidden" }}
-                    >
-                      <span className="text-xs text-purple-400 font-semibold uppercase tracking-widest mb-3">
-                        Lvl {topic.level}
-                      </span>
-                      <h3 className="text-sm font-bold text-white leading-snug line-clamp-3">
-                        {topic.title}
-                      </h3>
-                      <p className="text-xs text-neutral-600 mt-auto">Tap to reveal</p>
-                    </div>
-
-                    {/* Back */}
-                    <div
-                      className="absolute inset-0 rounded-2xl border border-purple-700/50 bg-gradient-to-br from-purple-950 to-neutral-900 flex flex-col p-4 overflow-hidden"
-                      style={{
-                        backfaceVisibility: "hidden",
-                        transform: "rotateY(180deg)",
-                      }}
-                    >
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <h3 className="text-xs font-bold text-white line-clamp-2">
-                          {topic.title}
-                        </h3>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedTopic(topic);
-                          }}
-                          className="p-1.5 -mr-1.5 -mt-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
-                          title="View details"
-                        >
-                          <Maximize2 size={14} />
-                        </button>
-                      </div>
-                      {topic.summary && (
-                        <p className="text-xs text-neutral-300 leading-relaxed line-clamp-5">
-                          {topic.summary}
-                        </p>
-                      )}
-                      {!topic.summary && topic.content && (
-                        <p className="text-xs text-neutral-400 leading-relaxed line-clamp-5">
-                          {topic.content.slice(0, 300)}
-                          {topic.content.length > 300 ? "…" : ""}
-                        </p>
-                      )}
-                      {topic.children && topic.children.length > 0 && (
-                        <div className="mt-auto pt-2 border-t border-neutral-700/50">
-                          <div className="flex flex-wrap gap-1">
-                            {topic.children.slice(0, 3).map((c) => (
-                              <span
-                                key={c._id}
-                                className="text-[10px] px-1.5 py-0.5 bg-purple-600/20 border border-purple-700/40 text-purple-300 rounded-full"
-                              >
-                                {c.title}
-                              </span>
-                            ))}
-                            {topic.children.length > 3 && (
-                              <span className="text-[10px] text-neutral-500">
-                                +{topic.children.length - 3} more
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Expanded Topic Modal */}
-      {expandedTopic && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div
-            className="bg-neutral-900 border border-neutral-700 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-800 shrink-0">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-semibold px-2 py-1 bg-purple-600/20 text-purple-400 rounded-md uppercase tracking-wide">
-                  Level {expandedTopic.level}
-                </span>
-                <h2 className="text-lg font-bold text-white line-clamp-1">{expandedTopic.title}</h2>
+      {/* Book Content */}
+      <div className="flex-1 overflow-y-auto p-4 md:p-8">
+        <div className="max-w-4xl mx-auto w-full">
+          <div className="bg-neutral-900/30 backdrop-blur-sm rounded-2xl border border-neutral-800/80 p-6 md:p-10 shadow-2xl">
+            <div className="flex items-center gap-3 mb-8 border-b border-neutral-800/60 pb-6">
+              <div className="p-3 bg-purple-500/10 rounded-xl border border-purple-500/20">
+                <BookOpen size={24} className="text-purple-400" />
               </div>
-              <button
-                onClick={() => setExpandedTopic(null)}
-                className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
-              >
-                <X size={18} />
-              </button>
+              <div>
+                <h2 className="text-2xl font-bold text-white tracking-tight">Table of Contents</h2>
+                <p className="text-sm text-neutral-500 mt-1">Navigate through chapters, topics, and subtopics.</p>
+              </div>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-5 space-y-6">
-              {expandedTopic.summary && (
-                <div>
-                  <h3 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-2">
-                    Summary
-                  </h3>
-                  <p className="text-neutral-200 leading-relaxed whitespace-pre-wrap text-sm">
-                    {expandedTopic.summary}
-                  </p>
-                </div>
-              )}
-              
-              {expandedTopic.content && (
-                <div>
-                  <h3 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-2">
-                    Content
-                  </h3>
-                  <p className="text-neutral-300 leading-relaxed whitespace-pre-wrap text-sm">
-                    {expandedTopic.content}
-                  </p>
-                </div>
-              )}
-              
-              {expandedTopic.children && expandedTopic.children.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-3">
-                    Subtopics ({expandedTopic.children.length})
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {expandedTopic.children.map((child) => (
-                      <div
-                        key={child._id}
-                        className="p-3 bg-neutral-800/50 border border-neutral-700/50 rounded-xl"
-                      >
-                        <h4 className="text-sm font-bold text-neutral-200 mb-1">{child.title}</h4>
-                        {child.summary && (
-                          <p className="text-xs text-neutral-400 line-clamp-2">
-                            {child.summary}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+            <div className="flex flex-col">
+              {topics.map((topic) => (
+                <BookNode key={topic._id} topic={topic} depth={0} searchQuery={searchQuery} />
+              ))}
             </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -641,7 +617,7 @@ export default function TopicBrowserPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"mindmap" | "flashcards">("mindmap");
+  const [activeTab, setActiveTab] = useState<"mindmap" | "bookview">("mindmap");
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
 
   const fetchProgress = useCallback(async () => {
@@ -668,7 +644,7 @@ export default function TopicBrowserPage() {
         headers: authHeaders(),
       });
       const data = await res.json();
-      if (data.success) setTopics(data.topics);
+      if (data.success) setTopics(prepareTree(data.topics));
     } catch { /* silent */ } finally {
       setIsLoading(false);
     }
@@ -750,14 +726,14 @@ export default function TopicBrowserPage() {
               <Map size={15} /> Mind Map
             </button>
             <button
-              onClick={() => setActiveTab("flashcards")}
+              onClick={() => setActiveTab("bookview")}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                activeTab === "flashcards"
+                activeTab === "bookview"
                   ? "bg-purple-600 text-white shadow"
                   : "text-neutral-400 hover:text-white"
               }`}
             >
-              <CreditCard size={15} /> Flash Cards
+              <List size={15} /> Table of Contents
             </button>
           </div>
         </div>
@@ -767,12 +743,12 @@ export default function TopicBrowserPage() {
           <div className="mt-3">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs text-neutral-500 capitalize">{progress.status}</span>
-              <span className="text-xs text-neutral-400">{progress.progress}/10</span>
+              <span className="text-xs text-neutral-400">{progress.progress}%</span>
             </div>
             <div className="h-1.5 bg-neutral-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-500"
-                style={{ width: `${(progress.progress / 10) * 100}%` }}
+                style={{ width: `${progress.progress}%` }}
               />
             </div>
           </div>
@@ -826,9 +802,9 @@ export default function TopicBrowserPage() {
             )}
           </div>
         ) : (
-          /* ── FLASH CARDS TAB ──────────────────────────────────────────── */
+          /* ── TABLE OF CONTENTS TAB ────────────────────────────────────── */
           <div className="h-full overflow-hidden">
-            <FlashCards topics={topics} />
+            <BookView topics={topics} />
           </div>
         )}
       </div>

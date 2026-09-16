@@ -38,5 +38,5 @@ const ChatContextSchema = new mongoose.Schema({
 });
 
 // 👇 ADD INDEXES HERE
-ChatContextSchema.index({ chatId: 1 });
+// ChatContextSchema.index({ chatId: 1 }); // unique: true in schema already creates this index
 export default mongoose.model("ChatContext", ChatContextSchema);

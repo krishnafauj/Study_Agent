@@ -17,6 +17,7 @@ import fileRoutes from "./fileRoutes.js";
 import topicRoutes from "./topicRoutes.js";
 import suggestionRoutes from "./suggestionRoutes.js";
 import recordsRoutes from "./recordsRoutes.js";
+import accessRoutes from "./accessRoutes.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 console.log("Route loaded");
 router.use("/auth", authRoutes);
@@ -35,6 +36,9 @@ router.use(suggestionRoutes);
 
 // Records & performance endpoints
 router.use(recordsRoutes);
+
+// Page-range access + knowledge-graph endpoints
+router.use(accessRoutes);
 
 // Chat streaming
 router.post("/chat-stream", chatStreamHandler);

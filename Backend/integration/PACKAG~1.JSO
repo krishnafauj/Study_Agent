@@ -1,0 +1,17 @@
+{
+  "name": "book-breaker",
+  "version": "1.0.0",
+  "description": "Subject-agnostic semantic + hierarchical PDF book chunker for high-quality RAG. Node orchestration, Python (PyMuPDF/pdfplumber) layout extraction, Groq LLM reasoning, OpenAI embeddings.",
+  "type": "module",
+  "main": "src/pipeline.js",
+  "scripts": {
+    "start": "node example.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@langchain/core": "^0.3.0",
+    "@langchain/groq": "^0.1.2",
+    "openai": "^4.56.0"
+  }
+}

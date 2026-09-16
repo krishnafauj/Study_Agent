@@ -1,0 +1,11 @@
+import { cosineSimilarity } from "./services/embeddingService.js";
+const near = (a,b)=>Math.abs(a-b)<1e-9;
+console.assert(near(cosineSimilarity([1,0,0],[1,0,0]),1), "identical=1");
+console.assert(near(cosineSimilarity([1,0],[0,1]),0), "orthogonal=0");
+console.assert(near(cosineSimilarity([1,1,0],[1,1,0]),1), "same dir=1");
+console.assert(cosineSimilarity([1,2,3],[2,4,6])>0.999, "scaled≈1");
+console.assert(cosineSimilarity([1,0],[1,0,0])===0, "len mismatch=0");
+console.assert(cosineSimilarity([0,0],[0,0])===0, "zero vec=0");
+const s = cosineSimilarity([0.2,0.5,0.1,0.8],[0.1,0.6,0.05,0.7]);
+console.log("mixed sim:", s.toFixed(4), "(expect ~0.98)");
+console.log("COSINE_OK");

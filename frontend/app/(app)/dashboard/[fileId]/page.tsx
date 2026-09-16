@@ -2,8 +2,15 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Plus, MessageSquare, Trash2, Pencil, Check, X as XIcon, Loader2, RefreshCw, File, BookOpen, Zap, UserPlus } from "lucide-react";
+import { ArrowLeft, Plus, MessageSquare, Trash2, Pencil, Check, X as XIcon, Loader2, RefreshCw, File, BookOpen, Zap, UserPlus, ChevronRight } from "lucide-react";
 import Link from "next/link";
+
+type Topic = {
+  _id: string;
+  title: string;
+  level: number;
+  children?: Topic[];
+};
 
 type Chat = {
   chatId: string;
@@ -43,6 +50,27 @@ export default function FileDashboardPage() {
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignEmail, setAssignEmail] = useState("");
   const [isAssigning, setIsAssigning] = useState(false);
+  const [topics, setTopics] = useState<Topic[]>([]);
+
+  const fetchTopics = useCallback(async () => {
+    if (!fileId) return;
+    try {
+      const res = await fetch(`${API_URL}/api/topics/${fileId}`, {
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Only keep Level 0 or 1 for top-level cards (Chapters)
+        setTopics(data.topics || []);
+      }
+    } catch (err) {
+      console.error("Failed to load topics:", err);
+    }
+  }, [fileId]);
+
+  useEffect(() => {
+    fetchTopics();
+  }, [fetchTopics]);
 
   const fetchFileDetails = useCallback(async () => {
     if (!fileId) return;
@@ -238,9 +266,9 @@ export default function FileDashboardPage() {
               </Link>
               {fileInfo?.isOwner !== false && (
                 <button
-                  onClick={() => setIsAssignModalOpen(true)}
+                  onClick={() => router.push(`/access/${fileId}`)}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-500 hover:to-teal-700 text-white font-semibold transition-all duration-200"
-                  title="Share / Assign"
+                  title="Manage access & permissions"
                 >
                   <UserPlus size={18} />
                   <span>Assign</span>
@@ -292,6 +320,64 @@ export default function FileDashboardPage() {
                 <span>Progress: {processingProgress.progress}/10</span>
                 <span>{Math.round((processingProgress.progress / 10) * 100)}%</span>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Chapters/Topics Grid */}
+        {topics && topics.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-4">
+              <BookOpen size={24} className="text-blue-500" />
+              Document Structure
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {topics.map((chapter) => (
+                <div key={chapter._id} className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-blue-500/50 transition-colors flex flex-col h-full group">
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-white mb-3 leading-snug group-hover:text-blue-400 transition-colors">
+                      {chapter.title}
+                    </h3>
+                    {chapter.children && chapter.children.length > 0 ? (
+                      <div className="space-y-2">
+                        {chapter.children.slice(0, 4).map(topic => (
+                          <div key={topic._id} className="text-sm text-neutral-300">
+                            <span className="font-medium text-neutral-400 mr-2">•</span>
+                            {topic.title}
+                            {topic.children && topic.children.length > 0 && (
+                              <div className="ml-4 mt-1 space-y-1">
+                                {topic.children.slice(0, 2).map(sub => (
+                                  <div key={sub._id} className="text-xs text-neutral-500 line-clamp-1">
+                                    - {sub.title}
+                                  </div>
+                                ))}
+                                {topic.children.length > 2 && (
+                                  <div className="text-xs text-neutral-600 italic">+{topic.children.length - 2} more subtopics</div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {chapter.children.length > 4 && (
+                          <div className="text-sm text-blue-500/80 font-medium pt-2">
+                            +{chapter.children.length - 4} more topics...
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-neutral-500 italic">No topics found.</p>
+                    )}
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-neutral-800 flex justify-end">
+                    <button 
+                      onClick={createNewChat}
+                      className="text-xs font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                    >
+                      Chat about this <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}

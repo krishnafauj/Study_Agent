@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Study Agent Project Report</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 15mm 14mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: #1b2430;
+      background: #ffffff;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.45;
+      font-size: 10.6pt;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      color: #0f172a;
+      line-height: 1.18;
+    }
+
+    h1 {
+      font-size: 28pt;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 17pt;
+      margin-bottom: 9px;
+      padding-bottom: 5px;
+      border-bottom: 2px solid #d7e0ee;
+    }
+
+    h3 {
+      font-size: 12pt;
+      margin: 11px 0 5px;
+    }
+
+    p {
+      margin: 0 0 8px;
+    }
+
+    ul, ol {
+      margin: 6px 0 9px 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 3px 0;
+    }
+
+    .page {
+      break-after: page;
+      min-height: 267mm;
+      position: relative;
+    }
+
+    .page:last-child {
+      break-after: auto;
+    }
+
+    .cover {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 267mm;
+      color: #eef6ff;
+      background:
+        linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(51, 65, 85, 0.88)),
+        radial-gradient(circle at 20% 20%, #38bdf8 0, transparent 32%),
+        radial-gradient(circle at 80% 18%, #a78bfa 0, transparent 30%),
+        radial-gradient(circle at 72% 82%, #22c55e 0, transparent 26%);
+      border-radius: 18px;
+      padding: 34px;
+    }
+
+    .cover h1 {
+      color: #ffffff;
+      font-size: 36pt;
+      max-width: 520px;
+    }
+
+    .cover .subtitle {
+      color: #dbeafe;
+      font-size: 15pt;
+      max-width: 620px;
+      margin-top: 16px;
+    }
+
+    .cover .badge-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 22px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      background: rgba(255, 255, 255, 0.08);
+      color: #e0f2fe;
+      font-size: 9pt;
+      font-weight: 700;
+    }
+
+    .cover-card {
+      width: 100%;
+      padding: 18px;
+      border-radius: 14px;
+      background: rgba(15, 23, 42, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .cover-card strong {
+      color: #ffffff;
+    }
+
+    .muted {
+      color: #566579;
+    }
+
+    .small {
+      font-size: 9pt;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 10px 0;
+    }
+
+    .card {
+      border: 1px solid #d7e0ee;
+      border-radius: 8px;
+      padding: 11px;
+      background: #f8fafc;
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0 12px;
+      font-size: 9.5pt;
+    }
+
+    .table th,
+    .table td {
+      border: 1px solid #d7e0ee;
+      padding: 7px;
+      vertical-align: top;
+    }
+
+    .table th {
+      background: #eaf1fb;
+      text-align: left;
+      color: #0f172a;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 7px;
+      margin: 10px 0;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 9px;
+      align-items: start;
+      padding: 9px;
+      border: 1px solid #d7e0ee;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .num {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #2563eb;
+      color: white;
+      font-weight: 700;
+      font-size: 9pt;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: #e0f2fe;
+      color: #075985;
+      font-size: 8.5pt;
+      font-weight: 700;
+      margin-right: 4px;
+    }
+
+    .warning {
+      padding: 10px;
+      border-left: 4px solid #f59e0b;
+      background: #fffbeb;
+      border-radius: 6px;
+      margin: 10px 0;
+    }
+
+    .diagram {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 7px;
+      align-items: stretch;
+      margin: 12px 0;
+    }
+
+    .box {
+      padding: 9px;
+      border-radius: 8px;
+      color: #0f172a;
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      min-height: 72px;
+    }
+
+    .box strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #0f172a;
+    }
+
+    .arrow {
+      text-align: center;
+      color: #64748b;
+      font-weight: 700;
+      margin: -3px 0 2px;
+    }
+
+    .footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      color: #94a3b8;
+      font-size: 8pt;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 5px;
+    }
+
+    code {
+      font-family: Consolas, Menlo, monospace;
+      font-size: 9pt;
+      background: #eef2f7;
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <section class="page">
+    <div class="cover">
+      <div>
+        <h1>Study Agent Project Report</h1>
+        <p class="subtitle">An AI study platform for uploading PDFs, extracting topic knowledge, assigning document access, and allowing students or researchers to chat with the material without receiving the original PDF file.</p>
+        <div class="badge-row">
+          <span class="badge">Next.js Frontend</span>
+          <span class="badge">Express Backend</span>
+          <span class="badge">MongoDB</span>
+          <span class="badge">S3 PDF Storage</span>
+          <span class="badge">Backend MCP Routes</span>
+          <span class="badge">RAG Chat</span>
+        </div>
+      </div>
+      <div class="cover-card">
+        <p><strong>Purpose:</strong> Explain what is being built, what happens inside the system, the main features, and how researchers/teachers can assign PDFs to students while keeping access controlled.</p>
+        <p><strong>Maximum length:</strong> Designed as an 8 page report for presentation or submission.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="page">
+    <h2>1. Project Overview</h2>
+    <p>Study Agent is a document-centered AI learning application. A user uploads a PDF such as notes, textbook chapters, research papers, or academic material. The backend stores the original PDF in S3, extracts text, builds a hierarchy of topics and subtopics, stores those topics in MongoDB, and makes them available to the chat and study interfaces.</p>
+    <p>The important idea is that the chat is not a generic chatbot. When a chat is opened inside a document, the backend builds a prompt from that document's extracted topics, weak areas, and relevant content chunks. This makes the assistant answer from the student's current material instead of from an unrestricted general context.</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>For Students</h3>
+        <ul>
+          <li>Upload study PDFs and organize them by document.</li>
+          <li>Ask questions in a file-specific chat.</li>
+          <li>Explore topics through mind maps and flash cards.</li>
+          <li>Receive suggestions based on weak or unattempted topics.</li>
+          <li>Track performance when the chat evaluates understanding.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>For Researchers and Teachers</h3>
+        <ul>
+          <li>Upload a paper, chapter, or curated reading material.</li>
+          <li>Assign access to students by email.</li>
+          <li>Let students ask questions from the material.</li>
+          <li>Avoid sending the raw PDF file directly.</li>
+          <li>Revoke access later if required.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Core Value</h3>
+    <p>Study Agent turns static PDFs into interactive learning sessions. Instead of only reading a document, students can ask, revise, test themselves, visualize the topic structure, and maintain a chat history per document.</p>
+
+    <table class="table">
+      <tr><th>Problem</th><th>Study Agent Solution</th></tr>
+      <tr><td>Students struggle to navigate long PDFs.</td><td>PDFs are converted into topic hierarchy, mind map, summaries, and flash cards.</td></tr>
+      <tr><td>Generic AI answers may drift away from course material.</td><td>Chats are scoped using extracted document topics and relevant content chunks.</td></tr>
+      <tr><td>Teachers need to distribute material but may not want to share the original file.</td><td>Assignment grants app access for chat and study views while raw download is owner-only.</td></tr>
+      <tr><td>Students do not know what to revise next.</td><td>Weak topics and not-attempted topics are surfaced for study planning.</td></tr>
+    </table>
+
+    <div class="footer">Study Agent Project Report</div>
+  </section>
+
+  <section class="page">
+    <h2>2. Core Functionalities</h2>
+    <p>The application is built around four connected workflows: document upload, topic extraction, document-scoped chat, and performance tracking.</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>PDF Upload and Storage</h3>
+        <p>Users upload PDF files through the app. The backend validates that the file is a PDF, stores it in AWS S3, records metadata in MongoDB, and computes a SHA256 hash for deduplication.</p>
+        <p><span class="tag">Backend</span><code>/api/files/upload</code></p>
+      </div>
+      <div class="card">
+        <h3>Automatic Topic Extraction</h3>
+        <p>After upload, the backend starts background PDF processing. It extracts text, detects document structure, generates summaries, creates embeddings, and stores topics recursively.</p>
+        <p><span class="tag">Service</span><code>pdfHierarchyService.js</code></p>
+      </div>
+      <div class="card">
+        <h3>File-Specific Chat</h3>
+        <p>Each PDF can have multiple chats. When a student chats inside a file, the backend loads the document's topics and relevant chunks before generating the answer.</p>
+        <p><span class="tag">API</span><code>/api/chat-stream</code></p>
+      </div>
+      <div class="card">
+        <h3>Assignment by Email</h3>
+        <p>Owners can assign a PDF to other users by email. Assigned users see the document in their sidebar and can create chats, while delete and owner-only download are not available to them.</p>
+        <p><span class="tag">API</span><code>/api/files/:id/assign</code></p>
+      </div>
+      <div class="card">
+        <h3>Topic Explorer</h3>
+        <p>Students can view the extracted topic hierarchy as a mind map, search the map, open topic details, and use flash cards generated from topics.</p>
+        <p><span class="tag">Frontend</span><code>/topics/[fileId]</code></p>
+      </div>
+      <div class="card">
+        <h3>Records and Weak Topics</h3>
+        <p>The system saves topic-level marks when chat interactions show student understanding. Records show overall score, attempts, weak topics, and learning progress.</p>
+        <p><span class="tag">Data</span><code>FolderSchema</code></p>
+      </div>
+    </div>
+
+    <h3>What Makes It Different</h3>
+    <ul>
+      <li>The PDF becomes a structured knowledge base, not just a file upload.</li>
+      <li>Chats are organized by file, so learning context stays clean.</li>
+      <li>Assigned documents appear separately from owned documents.</li>
+      <li>The app supports both study assistance and assessment-style tracking.</li>
+      <li>Backend MCP routes expose study context to AI/tool workflows in a controlled way.</li>
+    </ul>
+
+    <div class="footer">Study Agent Project Report</div>
+  </section>
+
+  <section class="page">
+    <h2>3. System Architecture</h2>
+    <p>The system has two active application layers: the Next.js frontend and the Express backend. MCP support is implemented inside the backend through internal guarded routes, rather than through the separate <code>mcp</code> folder. MongoDB stores users, files, topics, chats, progress, and performance records. AWS S3 stores the original PDFs. AI models are used for document analysis, chat responses, title generation, summaries, embeddings, and score detection.</p>
+
+    <div class="diagram">
+      <div class="box"><strong>Frontend</strong>Next.js pages for login, upload, dashboard, chat, records, and topic explorer.</div>
+      <div class="box"><strong>Backend API</strong>Express routes for auth, files, topics, chat, suggestions, and records.</div>
+      <div class="box"><strong>Processing</strong>PDF text extraction, hierarchy analysis, summaries, embeddings, and progress updates.</div>
+      <div class="box"><strong>Storage</strong>MongoDB for structured data and S3 for original PDF files.</div>
+      <div class="box"><strong>Backend MCP</strong>Internal guarded routes for context, weak topics, and RAG chunks.</div>
+    </div>
+
+    <h3>Frontend Responsibilities</h3>
+    <ul>
+      <li>Shows landing, authentication, home, chat, file dashboard, topic explorer, records, suggestions, and profile screens.</li>
+      <li>Stores the auth token in browser storage and sends it with API requests.</li>
+      <li>Streams chat responses from the backend using Server-Sent Events.</li>
+      <li>Organizes sidebar items into General chats, My Files, and Assigned to Me.</li>
+      <li>Allows file owners to assign and revoke document access.</li>
+    </ul>
+
+    <h3>Backend Responsibilities</h3>
+    <ul>
+      <li>Connects to MongoDB and registers protected API routes.</li>
+      <li>Validates uploaded PDFs and sends them to S3.</li>
+      <li>Starts background processing to extract topics from PDFs.</li>
+      <li>Builds study-context prompts and streams LLM responses.</li>
+      <li>Saves chat history, chat sessions, rolling summaries, scores, and records.</li>
+      <li>Protects backend MCP/internal routes using the <code>x-mcp-secret</code> header.</li>
+    </ul>
+
+    <h3>Backend MCP Responsibilities</h3>
+    <ul>
+      <li>Implements MCP-style context access in the backend instead of relying on the separate <code>mcp</code> folder.</li>
+      <li>Provides internal endpoints for folder context, weak topics, and RAG context.</li>
+      <li>Uses a shared secret so outside clients cannot call internal context routes directly.</li>
+      <li>Keeps study context and database access centralized in the backend.</li>
+    </ul>
+
+    <div class="footer">Study Agent Project Report</div>
+  </section>
+
+  <section class="page">
+    <h2>4. PDF Upload and Processing Flow</h2>
+    <p>When a user uploads a PDF, the backend does more than store the file. It prepares the PDF for AI-powered study by extracting text and transforming it into structured topics.</p>
+
+    <div class="flow">
+      <div class="step"><div class="num">1</div><div><strong>Upload</strong><br>The frontend sends the PDF to the backend. Multer stores it temporarily in memory and rejects non-PDF files.</div></div>
+      <div class="step"><div class="num">2</div><div><strong>Hash and Name</strong><br>The backend computes a SHA256 hash to detect duplicates. It reads the first page and derives a cleaner dynamic file name.</div></div>
+      <div class="step"><div class="num">3</div><div><strong>Deduplication</strong><br>If the same PDF hash already exists, the system creates a new file entry and copies existing topics instead of reprocessing the document.</div></div>
+      <div class="step"><div class="num">4</div><div><strong>S3 Storage</strong><br>If it is a new PDF, the backend uploads the original file to S3 and stores the S3 key in MongoDB.</div></div>
+      <div class="step"><div class="num">5</div><div><strong>Background Processing</strong><br>The backend runs <code>processPDFHierarchy</code>. Progress is saved in <code>ProcessingProgress</code> so the frontend can poll status.</div></div>
+      <div class="step"><div class="num">6</div><div><strong>Extraction and Analysis</strong><br>The processor tries <code>pdfjs-dist</code>, then PyMuPDF, then OCR fallback for scanned PDFs. It analyzes document type, topics, summaries, and embeddings.</div></div>
+      <div class="step"><div class="num">7</div><div><strong>Topic Storage</strong><br>Main topics and child topics are recursively saved into the <code>Topic</code> collection with level, parent topic ID, summary, content, and order.</div></div>
+    </div>
+
+    <h3>Topic Data Model</h3>
+    <p>Each topic belongs to a file and user. It includes hierarchy level, optional parent topic, title, summary, content, embedding, page metadata, order, and child count. This structure powers the mind map, flash cards, RAG retrieval, and chat grounding.</p>
+
+    <h3>Progress Tracking</h3>
+    <p>The frontend polls <code>/api/topics/progress/:fileId</code> every few seconds. The dashboard and topic page can show whether a document is pending, processing, completed, or failed.</p>
+
+    <div class="footer">Study Agent Project Report</div>
+  </section>
+
+  <section class="page">
+    <h2>5. Chat, RAG, and Learning Records</h2>
+    <p>The chat system is built around document context. When a user opens a chat with a <code>fileId</code>, the backend associates the chat session with that file. Future requests can recover the file context from the chat session if the frontend does not send it again.</p>
+
+    <h3>How a Chat Answer Is Generated</h3>
+    <ol>
+      <li>The frontend posts the user message, chat ID, and optional file ID to <code>/api/chat-stream</code>.</li>
+      <li>The backend loads or creates <code>ChatContext</code> for rolling memory.</li>
+      <li>If a file is attached, the backend loads all topics, performance marks, weak topics, and relevant chunks.</li>
+      <li>The backend builds a system prompt that restricts the assistant to the student's study material.</li>
+      <li>The LLM response is streamed token by token to the frontend using SSE.</li>
+      <li>The backend saves the user message and assistant response in <code>ChatMessage</code>.</li>
+      <li>The backend updates the chat title and rolling conversation summary.</li>
+    </ol>
+
+    <h3>RAG Context</h3>
+    <p>The app currently retrieves relevant topic chunks by matching the query against topic titles, summaries, and content. The topic model already stores embeddings, so this can later be upgraded to vector search for stronger semantic retrieval.</p>
+
+    <h3>Performance Scoring</h3>
+    <p>After a file-scoped chat response, the backend asks the model whether the exchange demonstrated understanding of a topic. If yes, it extracts a topic name, gives a score from 0 to 10, converts it to a percentage, and stores it in <code>FolderSchema</code>. The frontend receives a score update event and can show a toast.</p>
+
+    <table class="table">
+      <tr><th>Stored Item</th><th>Purpose</th></tr>
+      <tr><td><code>ChatSession</code></td><td>Stores chat title, file ID, folder ID, file name, user ID, and timestamps.</td></tr>
+      <tr><td><code>ChatMessage</code></td><td>Stores user and assistant messages for paginated chat history.</td></tr>
+      <tr><td><code>ChatContext</code></td><td>Stores recent messages and rolling summary to keep conversation memory compact.</td></tr>
+      <tr><td><code>FolderSchema</code></td><td>Stores marks, average performance score, weak flag, and topic performance records.</td></tr>
+    </table>
+
+    <h3>Student Experience</h3>
+    <p>The student sees a chat interface with streaming responses, copy, resend, edit-message, title rename, chat history pagination, and score notifications. Chats can be general or attached to a specific PDF.</p>
+
+    <div class="footer">Study Agent Project Report</div>
+  </section>
+
+  <section class="page">
+    <h2>6. Assignment and Controlled PDF Access</h2>
+    <p>The assignment feature lets a file owner grant another user access to a PDF-based study experience by email. This is useful for teachers, research mentors, and project leads who want students to learn from a document without sending the original PDF file directly.</p>
+
+    <h3>How Assignment Works</h3>
+    <div class="flow">
+      <div class="step"><div class="num">1</div><div><strong>Owner Opens File Dashboard</strong><br>The dashboard shows the selected PDF, processing progress, chats, topics link, and an Assign button.</div></div>
+      <div class="step"><div class="num">2</div><div><strong>Owner Enters Emails</strong><br>The owner can enter one or multiple emails separated by commas or spaces.</div></div>
+      <div class="step"><div class="num">3</div><div><strong>Backend Updates Access List</strong><br>The backend verifies the requester owns the file, then appends emails to the file's <code>assignedTo</code> array.</div></div>
+      <div class="step"><div class="num">4</div><div><strong>Email Notification</strong><br>The backend attempts to send an assignment email to each new recipient.</div></div>
+      <div class="step"><div class="num">5</div><div><strong>Assigned User Sees the File</strong><br>The file listing route returns files where the user is owner or where their email appears in <code>assignedTo</code>.</div></div>
+      <div class="step"><div class="num">6</div><div><strong>Assigned User Chats</strong><br>The assigned user can create chats for that file and ask questions grounded in its topics.</div></div>
+    </div>
+
+    <h3>Access Rules in Current Code</h3>
+    <table class="table">
+      <tr><th>Action</th><th>Owner</th><th>Assigned User</th></tr>
+      <tr><td>List file</td><td>Allowed</td><td>Allowed if email is assigned</td></tr>
+      <tr><td>Create chat for file</td><td>Allowed</td><td>Allowed</td></tr>
+      <tr><td>Open topic dashboard</td><td>Allowed by file visibility</td><td>Allowed by file visibility in UI flow</td></tr>
+      <tr><td>Assign or revoke users</td><td>Allowed</td><td>Not shown in frontend and backend requires ownership</td></tr>
+      <tr><td>Delete file</td><td>Allowed</td><td>Not shown in frontend and backend requires ownership</td></tr>
+      <tr><td>Download original PDF</td><td>Allowed through owner-only route</td><td>Blocked by owner check</td></tr>
+    </table>
+
+    <div class="warning">
+      <strong>Important content-protection note:</strong> The current system does not share the original PDF file with assigned users, but assigned users can still learn information from extracted topics and chat answers. If the goal is strict non-disclosure of document content, the topic explorer should be restricted and chat responses should be configured to answer only at a limited abstraction level.
+    </div>
+
+    <h3>Why This Helps Researchers and Teachers</h3>
+    <ul>
+      <li>They can assign a paper, chapter, or reading set without emailing the PDF.</li>
+      <li>Students can ask questions and understand the material interactively.</li>
+      <li>The owner can revoke access when the assignment period ends.</li>
+      <li>Students' interaction can create performance records and weak-topic signals.</li>
+      <li>The same processed PDF can be reused through deduplication, reducing repeated processing cost.</li>
+    </ul>
+
+    <div class="footer">Study Agent Project Report</div>
+  </section>
+
+  <section class="page">
+    <h2>7. MCP, Backend, and Frontend Details</h2>
+    <h3>Backend MCP Tools</h3>
+    <p>MCP is implemented in the backend only. The separate <code>mcp</code> folder is not treated as an active runtime component in this report. Backend routes expose guarded study-context operations using the shared <code>MCP_SECRET</code>, keeping database logic centralized in the Express application.</p>
+
+    <table class="table">
+      <tr><th>Backend MCP Operation</th><th>What It Returns</th><th>Why It Matters</th></tr>
+      <tr><td><code>get_folder_context</code></td><td>All extracted topics and performance marks for a file.</td><td>Lets an AI understand what material exists in the current study session.</td></tr>
+      <tr><td><code>get_weak_topics</code></td><td>Topics below a performance threshold or not attempted.</td><td>Supports personalized revision suggestions.</td></tr>
+      <tr><td><code>get_rag_context</code></td><td>Relevant topic chunks for a query.</td><td>Grounds answers in actual document content.</td></tr>
+    </table>
+
+    <h3>Backend Modules</h3>
+    <ul>
+      <li><code>index.js</code>: starts Express, CORS, JSON parsing, MongoDB connection, public API routes, and backend MCP/internal routes.</li>
+      <li><code>fileRoutes.js</code>: handles PDF upload, file listing, download URL, rename, delete, assignment, and revoke.</li>
+      <li><code>topicRoutes.js</code>: starts or checks processing and returns topic hierarchy.</li>
+      <li><code>chatStreamController.js</code>: builds system prompt, streams model output, saves chat messages, updates scores, and manages memory.</li>
+      <li><code>studyContextService.js</code>: fetches topics, weak topics, and RAG chunks directly from MongoDB for chat prompting.</li>
+      <li><code>internalMcpRoutes.js</code>: exposes backend context endpoints only to trusted callers with the secret header.</li>
+    </ul>
+
+    <h3>Frontend Modules</h3>
+    <ul>
+      <li><code>/home</code>: starts general chats with suggested prompts.</li>
+      <li><code>/chat/[id]</code>: streams chat, loads history, initializes file context, shows score updates, and supports message tools.</li>
+      <li><code>/dashboard/[fileId]</code>: shows document-level chats, processing progress, topics link, assignment modal, and revoke list.</li>
+      <li><code>/topics/[fileId]</code>: renders mind map and flash card views from extracted topics.</li>
+      <li><code>Sidebar.tsx</code>: organizes chats and files into General, My Files, and Assigned to Me sections.</li>
+      <li><code>/records</code>: summarizes scores and attempts across owned and assigned files.</li>
+    </ul>
+
+    <h3>Security Controls Present</h3>
+    <ul>
+      <li>Protected user API routes require JWT verification.</li>
+      <li>Assignment and revoke actions require file ownership.</li>
+      <li>Original PDF download route checks ownership.</li>
+      <li>Backend MCP/internal routes require a shared secret header.</li>
+      <li>S3 file access is through presigned URL generation, not public file URLs.</li>
+    </ul>
+
+    <div class="footer">Study Agent Project Report</div>
+  </section>
+
+  <section class="page">
+    <h2>8. Impact, Use Cases, and Future Improvements</h2>
+    <h3>Use Cases</h3>
+    <ul>
+      <li><strong>Classroom study:</strong> A teacher uploads chapter PDFs and assigns them to students for guided chat-based revision.</li>
+      <li><strong>Research onboarding:</strong> A researcher assigns papers to juniors so they can ask conceptual questions without receiving the raw PDF.</li>
+      <li><strong>Exam preparation:</strong> Students upload notes, generate topic maps, quiz themselves, and focus on weak areas.</li>
+      <li><strong>Collaborative reading:</strong> A group can work from the same assigned source while each user's chats remain separate.</li>
+    </ul>
+
+    <h3>Recommended Improvements</h3>
+    <table class="table">
+      <tr><th>Area</th><th>Improvement</th></tr>
+      <tr><td>Strict content protection</td><td>Add permissions to hide topic content from assigned users or provide only chat access with controlled answer detail.</td></tr>
+      <tr><td>Retrieval quality</td><td>Replace regex-based RAG with vector search using the stored embeddings.</td></tr>
+      <tr><td>Authorization consistency</td><td>Make topic routes explicitly allow both owners and assigned users, instead of relying on user-owned topic queries only.</td></tr>
+      <tr><td>Auditability</td><td>Log assignment, revoke, chat, and download events for researchers or institutions.</td></tr>
+      <tr><td>Analytics</td><td>Add teacher-facing dashboards showing student engagement, weak areas, and completion.</td></tr>
+      <tr><td>Scalability</td><td>Move PDF processing into a job queue so large PDFs do not depend on long-running request-side background work.</td></tr>
+    </table>
+
+    <h3>Conclusion</h3>
+    <p>Study Agent is a practical AI learning system that converts PDFs into structured, interactive study material. The backend handles storage, processing, topic creation, chat grounding, scoring, assignment, and MCP-style internal context access. The frontend gives users an organized study workspace with chat, dashboards, mind maps, flash cards, records, and controlled access flows.</p>
+    <p>The strongest product story is controlled learning access: a researcher or teacher can upload a PDF, assign it to students, and let them chat with the knowledge inside the app without directly distributing the original PDF file. With stricter content controls and vector retrieval, this can become a strong platform for academic study, research onboarding, and personalized revision.</p>
+
+    <div class="card">
+      <h3>One-Line Summary</h3>
+      <p>Study Agent transforms uploaded PDFs into secure, assigned, AI-powered study sessions where students can ask questions, explore topics, and track learning progress.</p>
+    </div>
+
+    <div class="footer">Study Agent Project Report</div>
+  </section>
+</body>
+</html>

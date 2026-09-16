@@ -39,6 +39,35 @@ const topicSchema = new mongoose.Schema(
       type: [Number],
       default: [], // 1536-dimensional vector from OpenAI
     },
+    // LLM Document Understanding
+    keyConcepts: {
+      type: Array, // [{ concept, definition }]
+      default: [],
+    },
+    formulas: {
+      type: Array, // [{ name, expression, explanation }]
+      default: [],
+    },
+    mcqs: {
+      type: Array, // [{ question, options, correctAnswer, explanation }]
+      default: [],
+    },
+    // Dotted section number for display: "1", "1.2", "4.1.2"
+    number: {
+      type: String,
+      default: "",
+    },
+    // Content classification (definition/example/formula/table/mcq/...) for chunks
+    contentType: {
+      type: String,
+      default: "",
+    },
+    // true = retrievable leaf chunk (not a structural outline node / flashcard)
+    isChunk: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     // Metadata
     pageStart: {
       type: Number,

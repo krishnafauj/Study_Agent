@@ -3,7 +3,8 @@ import Topic from "../models/topic.js";
 import ProcessingProgress from "../models/processingProgress.js";
 import UserFile from "../models/userFile.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
-import { processPDFHierarchy } from "../services/pdfHierarchyService.js";
+import { processFromS3 } from "../integration/src/pipeline.js";
+import { buildConceptEdges } from "../services/knowledgeGraphService.js";
 
 const router = express.Router();
 
@@ -207,7 +208,7 @@ async function processFileAsync(fileId, userId, s3Key, fileName) {
     console.log(`\n🔄 [BACKGROUND] Starting async processing for file: ${fileName}`);
     
     const updateProgress = async (data) => {
-      console.log(`⏳ [PROGRESS] ${data.status} - Progress: ${data.progress}/10 - ${data.message || ""}`);
+      console.log(`⏳ [S3-PROCESS] ${data.status} - Progress: ${data.progress}% - ${data.message || ""}`);
       await ProcessingProgress.updateOne(
         { fileId },
         {
@@ -219,72 +220,113 @@ async function processFileAsync(fileId, userId, s3Key, fileName) {
     };
 
     // Start processing
-    const result = await processPDFHierarchy(
+    const result = await processFromS3(
       s3Key,
-      fileName,
-      fileId,
-      userId,
-      updateProgress
+      {
+        bucket: process.env.S3_BUCKET,
+        fileName: fileName,
+        refineOutline: true,
+        useLlmContentType: true,
+        embed: true,
+        progress: updateProgress
+      }
     );
 
-    console.log(`\n💾 [DATABASE] Inserting ${result.totalTopics} topics into database...`);
+    console.log(`\n💾 [DATABASE] Inserting nodes and chunks into database...`);
 
-    // Insert topics into database recursively
-    const insertTopics = async (topics, parentId = null, level = 0) => {
-      let inserted = 0;
-      for (const topic of topics) {
+    let inserted = 0;
+    const nodeMap = new Map();
+
+    const insertOutline = async (nodes, parentId = null) => {
+      for (const node of nodes) {
         try {
-          console.log(`  📝 [DB] Creating topic: "${topic.title}" (level: ${level}, hasEmbedding: ${topic.embedding && topic.embedding.length > 0})`);
-          
+          console.log(`  📝 [DB] Creating outline node: "${node.title}" (level: ${node.level})`);
           const newTopic = await Topic.create({
             fileId,
             userId,
-            level: topic.level,
+            level: node.level,
             parentTopicId: parentId,
-            title: topic.title,
-            summary: topic.summary,
-            content: topic.content,
-            embedding: topic.embedding || [],
-            order: topic.order,
+            title: node.title,
+            summary: "",
+            content: node.title,
+            embedding: [],
+            order: inserted,
+            number: node.number || "",
+            isChunk: false,
+            pageStart: node.pageStart || 0,
+            pageEnd: node.pageEnd || 0,
           });
-
-          console.log(`  ✅ [DB] Successfully stored: "${newTopic.title}" (ID: ${newTopic._id}, embedding size: ${newTopic.embedding.length})`);
+          nodeMap.set(node.id, newTopic._id);
           inserted++;
 
-          // Insert children
-          if (topic.children && topic.children.length > 0) {
-            console.log(`  🔄 [DB] Processing ${topic.children.length} children of "${topic.title}"...`);
-            const childCount = await insertTopics(topic.children, newTopic._id, level + 1);
-            inserted += childCount;
+          if (node.children && node.children.length > 0) {
+            await insertOutline(node.children, newTopic._id);
           }
-        } catch (dbErr) {
-          console.error(`  ❌ [DB] Failed to insert "${topic.title}": ${dbErr.message}`);
+        } catch (err) {
+          console.error(`  ❌ [DB] Failed to insert outline "${node.title}": ${err.message}`);
         }
       }
-      return inserted;
     };
 
-    const totalInserted = await insertTopics(result.topics);
+    const insertChunks = async (chunks) => {
+      for (const chunk of chunks) {
+        try {
+          const parentId = nodeMap.get(chunk.nodeId) || null;
+          const newTopic = await Topic.create({
+            fileId,
+            userId,
+            level: 99, 
+            parentTopicId: parentId,
+            title: chunk.title || "Content Chunk",
+            summary: chunk.kind || "text",
+            content: chunk.text,
+            embedding: chunk.embedding || [],
+            order: inserted,
+            isChunk: true,
+            contentType: chunk.contentType || "",
+            pageStart: chunk.pageStart || 0,
+            pageEnd: chunk.pageEnd || 0,
+          });
+          inserted++;
+        } catch (err) {
+          console.error(`  ❌ [DB] Failed to insert chunk: ${err.message}`);
+        }
+      }
+    };
+
+    // Clear any previously-extracted topics for this file to avoid duplicates on reprocess.
+    const cleared = await Topic.deleteMany({ fileId });
+    if (cleared.deletedCount) console.log(`🧹 [DB] Cleared ${cleared.deletedCount} stale topics before reinsert`);
+
+    await insertOutline(result.outline);
+    await insertChunks(result.chunks);
+    const totalInserted = inserted;
     console.log(`\n✅ [DATABASE] Successfully inserted ${totalInserted} topics into MongoDB`);
 
     // Mark as completed
-    console.log(`⏳ [AUTO-PROCESS] embedding - Progress: 9/10 - Finalizing database...`);
+    console.log(`⏳ [AUTO-PROCESS] embedding - Progress: 90/100 - Finalizing database...`);
     await ProcessingProgress.updateOne(
       { fileId },
       {
         status: "completed",
-        progress: 10,
-        totalTopics: result.totalTopics,
-        topicsCreated: result.totalTopics,
+        progress: 100,
+        totalTopics: totalInserted,
+        topicsCreated: totalInserted,
         completedAt: new Date(),
       }
     );
 
     console.log("\n" + "=".repeat(80));
     console.log(`✅ [COMPLETE] File processing completed successfully!`);
-    console.log(`📊 Total Topics: ${result.totalTopics}`);
+    console.log(`📊 Total Chunks: ${result.stats.totalChunks}`);
     console.log(`💾 Total Stored in DB: ${totalInserted}`);
     console.log("=".repeat(80) + "\n");
+
+    // Build the prerequisite knowledge graph once, after topics/chunks exist.
+    // Runs in the background so it never delays the "completed" state.
+    buildConceptEdges(fileId, { useLlm: false })
+      .then((s) => console.log(`🕸️  [GRAPH] ${s.edges} edges over ${s.nodes} nodes for ${fileId}`))
+      .catch((e) => console.warn(`🕸️  [GRAPH] build failed: ${e.message}`));
   } catch (err) {
     console.error("\n" + "=".repeat(80));
     console.error(`❌ [ERROR] File processing failed!`);
