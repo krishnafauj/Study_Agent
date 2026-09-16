@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Download, Trash2, Pencil, Check, X, UploadCloud, RefreshCw, UserPlus,
-  FileText, Loader2, HardDrive, Files as FilesIcon, ArrowUpRight,
+  FileText, Loader2, HardDrive, Files as FilesIcon, ArrowUpRight, Search,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -40,6 +40,7 @@ export default function ProfileFileStoragePage() {
   const [assignModalFile, setAssignModalFile] = useState<DocRecord | null>(null);
   const [assignEmail, setAssignEmail] = useState("");
   const [isAssigning, setIsAssigning] = useState(false);
+  const [search, setSearch] = useState("");
 
   const notify = (msg: string, err = false) => {
     setMessage(msg);
@@ -226,6 +227,11 @@ export default function ProfileFileStoragePage() {
   };
 
   const totalSize = useMemo(() => docs.reduce((sum, d) => sum + (d.fileSize || 0), 0), [docs]);
+  const filteredDocs = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return docs;
+    return docs.filter((d) => d.fileName.toLowerCase().includes(q));
+  }, [docs, search]);
 
   return (
     <div className="h-full overflow-y-auto bg-gradient-to-b from-neutral-950 via-neutral-950 to-black">
@@ -264,8 +270,9 @@ export default function ProfileFileStoragePage() {
           </div>
         </div>
 
-        {/* Upload card */}
-        <div className="mb-8 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-5 sm:p-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr] lg:items-start">
+        {/* Upload card (left) */}
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-5 sm:p-6 lg:sticky lg:top-4">
           <h2 className="mb-4 text-base font-semibold text-white">Upload new document</h2>
 
           <label
@@ -343,19 +350,36 @@ export default function ProfileFileStoragePage() {
           )}
         </div>
 
-        {/* Files list */}
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-white">
-            Your files <span className="text-neutral-500">({docs.length})</span>
-          </h2>
-          <button
-            onClick={loadDocs}
-            disabled={isLoading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 px-3 py-1.5 text-xs text-neutral-400 transition-colors hover:bg-neutral-900 hover:text-white disabled:opacity-50"
-          >
-            <RefreshCw size={13} className={isLoading ? "animate-spin" : ""} /> Refresh
-          </button>
-        </div>
+        {/* Files (right) */}
+        <div>
+          {/* Search */}
+          <div className="mb-4 flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/60 px-3 py-2.5 transition-colors focus-within:border-blue-500/60">
+            <Search size={16} className="shrink-0 text-neutral-500" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search your documents…"
+              className="w-full bg-transparent text-sm text-white placeholder-neutral-600 outline-none"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="text-neutral-500 hover:text-white">
+                <X size={15} />
+              </button>
+            )}
+          </div>
+
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-white">
+              Your files <span className="text-neutral-500">({filteredDocs.length})</span>
+            </h2>
+            <button
+              onClick={loadDocs}
+              disabled={isLoading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 px-3 py-1.5 text-xs text-neutral-400 transition-colors hover:bg-neutral-900 hover:text-white disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isLoading ? "animate-spin" : ""} /> Refresh
+            </button>
+          </div>
 
         {isLoading && docs.length === 0 ? (
           <div className="space-y-2">
@@ -363,17 +387,17 @@ export default function ProfileFileStoragePage() {
               <div key={i} className="h-[74px] animate-pulse rounded-xl border border-neutral-800 bg-neutral-900/50" />
             ))}
           </div>
-        ) : docs.length === 0 ? (
+        ) : filteredDocs.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-neutral-800 bg-neutral-900/30 p-12 text-center">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-800">
               <FileText className="text-neutral-500" size={26} />
             </div>
-            <p className="font-medium text-neutral-300">No documents yet</p>
-            <p className="mt-1 text-sm text-neutral-500">Upload a PDF above to get started.</p>
+            <p className="font-medium text-neutral-300">{search ? "No matching documents" : "No documents yet"}</p>
+            <p className="mt-1 text-sm text-neutral-500">{search ? "Try a different search." : "Upload a PDF to get started."}</p>
           </div>
         ) : (
           <div className="space-y-2.5">
-            {docs.map((doc) => (
+            {filteredDocs.map((doc) => (
               <div
                 key={doc._id}
                 className="group flex items-center gap-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-3.5 transition-colors hover:border-neutral-700 hover:bg-neutral-900"
@@ -442,6 +466,8 @@ export default function ProfileFileStoragePage() {
             ))}
           </div>
         )}
+        </div>
+        </div>
       </div>
 
       {/* Toast */}

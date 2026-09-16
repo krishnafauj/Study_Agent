@@ -1,0 +1,277 @@
+<title>Parse Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef1f5;
+    --border: #d8dee7;
+    --fg: #10141b;
+    --muted: #5b6675;
+    --faint: #8792a3;
+    --accent: #2f6df6;
+    --accent-soft: #e5edff;
+    --store: #0e9f6e;
+    --store-soft: #dcf5ea;
+    --llm: #7c3aed;
+    --llm-soft: #efe7fe;
+    --shadow: 0 1px 2px rgba(16,20,27,.06), 0 8px 24px rgba(16,20,27,.05);
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #0b0e13;
+      --surface: #141922;
+      --surface-2: #1b2230;
+      --border: #2a3444;
+      --fg: #eef2f8;
+      --muted: #9aa6b6;
+      --faint: #6b7686;
+      --accent: #5b8cff;
+      --accent-soft: #17233f;
+      --store: #34d399;
+      --store-soft: #0f2a22;
+      --llm: #a78bfa;
+      --llm-soft: #221a3a;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0e13;
+    --surface: #141922;
+    --surface-2: #1b2230;
+    --border: #2a3444;
+    --fg: #eef2f8;
+    --muted: #9aa6b6;
+    --faint: #6b7686;
+    --accent: #5b8cff;
+    --accent-soft: #17233f;
+    --store: #34d399;
+    --store-soft: #0f2a22;
+    --llm: #a78bfa;
+    --llm-soft: #221a3a;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; padding-block: 48px 72px; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-size: clamp(30px, 6vw, 46px); font-weight: 700; letter-spacing: -.02em;
+    margin: 10px 0 12px; text-wrap: balance;
+  }
+  .lede { color: var(--muted); font-size: 17px; max-width: 62ch; margin: 0; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 26px 0 4px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px; font-weight: 500;
+    padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .dot.store { background: var(--store); }
+  .dot.llm { background: var(--llm); }
+
+  .section-label {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--faint); margin: 48px 0 14px;
+  }
+
+  figure { margin: 0; }
+  .diagram-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
+  .diagram-scroll svg { display: block; min-width: 900px; width: 100%; height: auto; }
+  figcaption { color: var(--muted); font-size: 13.5px; margin-top: 12px; max-width: 70ch; }
+
+  .node { fill: var(--surface-2); stroke: var(--border); stroke-width: 1.5; }
+  .node.accent { fill: var(--accent-soft); stroke: var(--accent); }
+  .node.store { fill: var(--store-soft); stroke: var(--store); }
+  .node.llm { fill: var(--llm-soft); stroke: var(--llm); }
+  .nt { fill: var(--fg); font-family: "IBM Plex Sans", sans-serif; font-size: 14px; font-weight: 600; }
+  .ns { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 11px; }
+  .flow-line { stroke: var(--faint); stroke-width: 2; fill: none; }
+  .flow-label { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 10.5px; }
+
+  /* Stage spine */
+  .spine { display: grid; gap: 14px; }
+  .stage {
+    display: grid; grid-template-columns: 44px 1fr; gap: 16px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 18px 18px 18px 14px; box-shadow: var(--shadow);
+  }
+  .num {
+    font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 14px;
+    width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+    background: var(--surface-2); color: var(--fg); border: 1px solid var(--border);
+  }
+  .stage.is-store .num { background: var(--store-soft); color: var(--store); border-color: var(--store); }
+  .stage.is-llm .num { background: var(--llm-soft); color: var(--llm); border-color: var(--llm); }
+  .stage h3 { margin: 4px 0 2px; font-size: 16.5px; font-weight: 600; letter-spacing: -.01em; }
+  .stage p { margin: 6px 0 0; color: var(--muted); font-size: 14.5px; }
+  .file {
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--accent);
+    background: var(--accent-soft); padding: 2px 7px; border-radius: 6px; white-space: nowrap;
+  }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .tag {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px;
+  }
+  code { font-family: "IBM Plex Mono", monospace; font-size: .92em; color: var(--fg); }
+
+  .note {
+    margin-top: 26px; border-left: 3px solid var(--accent); background: var(--surface);
+    border-radius: 0 12px 12px 0; padding: 14px 16px; color: var(--muted); font-size: 14px;
+  }
+  .note b { color: var(--fg); }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Study&nbsp;Agent · Document ingestion</div>
+    <h1>How a document gets parsed</h1>
+    <p class="lede">A PDF is never parsed as a whole. Upload only stores the file; each page-range <em>section</em> is parsed on its own — extract → chunk → structure → embed → save — so a big book never hits the LLM in one shot.</p>
+    <div class="legend">
+      <span class="chip"><span class="dot store"></span>Store only — no LLM</span>
+      <span class="chip"><span class="dot llm"></span>LLM + embeddings</span>
+    </div>
+  </header>
+
+  <div class="section-label">The per-section parse — what actually runs</div>
+  <figure>
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 1120 210" role="img" aria-label="A PDF buffer from S3 is read for pages a to b, split into page-tracked chunks, sent to the LLM for structure, embedded into vectors, and saved as Topic documents tagged with sectionId and pages.">
+        <defs>
+          <marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--faint)"/>
+          </marker>
+        </defs>
+
+        <!-- nodes: y 74..150 -->
+        <g>
+          <rect class="node" x="12" y="74" width="150" height="76" rx="12"/>
+          <text class="nt" x="87" y="104" text-anchor="middle">PDF buffer</text>
+          <text class="ns" x="87" y="124" text-anchor="middle">from S3</text>
+        </g>
+        <g>
+          <rect class="node accent" x="204" y="74" width="164" height="76" rx="12"/>
+          <text class="nt" x="286" y="100" text-anchor="middle">Extract range</text>
+          <text class="ns" x="286" y="118" text-anchor="middle">extractPagesText</text>
+          <text class="ns" x="286" y="133" text-anchor="middle">pages a–b (pdfjs)</text>
+        </g>
+        <g>
+          <rect class="node" x="410" y="74" width="164" height="76" rx="12"/>
+          <text class="nt" x="492" y="100" text-anchor="middle">Chunk</text>
+          <text class="ns" x="492" y="118" text-anchor="middle">chunkPagesByChars</text>
+          <text class="ns" x="492" y="133" text-anchor="middle">~4k chars + pages</text>
+        </g>
+        <g>
+          <rect class="node llm" x="616" y="74" width="164" height="76" rx="12"/>
+          <text class="nt" x="698" y="100" text-anchor="middle">LLM structure</text>
+          <text class="ns" x="698" y="118" text-anchor="middle">Groq gpt-oss-20b</text>
+          <text class="ns" x="698" y="133" text-anchor="middle">JSON outline</text>
+        </g>
+        <g>
+          <rect class="node llm" x="822" y="74" width="140" height="76" rx="12"/>
+          <text class="nt" x="892" y="100" text-anchor="middle">Embed</text>
+          <text class="ns" x="892" y="118" text-anchor="middle">OpenAI</text>
+          <text class="ns" x="892" y="133" text-anchor="middle">1536-d vectors</text>
+        </g>
+        <g>
+          <rect class="node store" x="1004" y="74" width="104" height="76" rx="12"/>
+          <text class="nt" x="1056" y="100" text-anchor="middle">Save</text>
+          <text class="ns" x="1056" y="118" text-anchor="middle">Topic docs</text>
+          <text class="ns" x="1056" y="133" text-anchor="middle">+sectionId</text>
+        </g>
+
+        <!-- arrows -->
+        <line class="flow-line" x1="162" y1="112" x2="200" y2="112" marker-end="url(#arw)"/>
+        <line class="flow-line" x1="368" y1="112" x2="406" y2="112" marker-end="url(#arw)"/>
+        <text class="flow-label" x="387" y="66" text-anchor="middle">text</text>
+        <line class="flow-line" x1="574" y1="112" x2="612" y2="112" marker-end="url(#arw)"/>
+        <text class="flow-label" x="593" y="66" text-anchor="middle">chunks</text>
+        <line class="flow-line" x1="780" y1="112" x2="818" y2="112" marker-end="url(#arw)"/>
+        <text class="flow-label" x="799" y="66" text-anchor="middle">tree</text>
+        <line class="flow-line" x1="962" y1="112" x2="1000" y2="112" marker-end="url(#arw)"/>
+        <text class="flow-label" x="981" y="66" text-anchor="middle">vectors</text>
+      </svg>
+    </div>
+    <figcaption>Every chunk keeps the real <code>pageStart</code>/<code>pageEnd</code> it came from. That is what lets scoped chat restrict answers to a section's pages — and it fixes the old bug where whole-document chunks were saved with page&nbsp;0 and silently dropped.</figcaption>
+  </figure>
+
+  <div class="section-label">Full lifecycle — upload to answer</div>
+  <div class="spine">
+
+    <div class="stage is-store">
+      <div class="num">1</div>
+      <div>
+        <h3>Upload &nbsp;<span class="file">POST /api/files/upload</span></h3>
+        <p>Multer takes the PDF (100&nbsp;MB, PDF-only). A SHA-256 hash dedupes re-uploads; page&nbsp;1 text derives a friendly filename; the bytes go to S3 and a <code>UserFile</code> is created. Page count is stored — <b>no parse, no LLM.</b></p>
+        <div class="tags"><span class="tag">fileRoutes.js</span><span class="tag">namingService.js</span><span class="tag">getPdfPageCount</span></div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="num">2</div>
+      <div>
+        <h3>Create a section &nbsp;<span class="file">POST /api/access/:fileId/sections</span></h3>
+        <p>You define a page range. A <code>PermissionSection</code> is created with <code>parseStatus:&nbsp;"parsing"</code>, the request returns immediately, and <code>parseSection()</code> is fired in the background — parsing is triggered the moment a section exists.</p>
+        <div class="tags"><span class="tag">accessRoutes.js</span></div>
+      </div>
+    </div>
+
+    <div class="stage is-llm">
+      <div class="num">3</div>
+      <div>
+        <h3>Parse that section &nbsp;<span class="file">sectionParseService.js</span></h3>
+        <p>Fetch the PDF from S3, clear any old topics for the section, then run <code>processPageRange</code> over just its pages — the five-step flow in the diagram above (extract → chunk → LLM → embed). Progress ticks on the section itself.</p>
+        <div class="tags"><span class="tag">pipeline.js</span><span class="tag">llmExtractor.js</span><span class="tag">embeddings.js</span></div>
+      </div>
+    </div>
+
+    <div class="stage is-store">
+      <div class="num">4</div>
+      <div>
+        <h3>Save topics</h3>
+        <p>The outline (chapter → topic → subtopic) and the leaf chunks are written as <code>Topic</code> documents, each stamped with <code>sectionId</code> and real page numbers. The section flips to <code>parsed</code> with a topic count, and the UI badge updates from “Parsing %” to “✓ N topics”.</p>
+        <div class="tags"><span class="tag">models/topic.js</span><span class="tag">permissionSection.js</span></div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="num">5</div>
+      <div>
+        <h3>Build the knowledge graph &nbsp;<span class="file">optional · one click</span></h3>
+        <p><code>buildConceptEdges</code> derives prerequisite links across the parsed topics — earlier concepts a later topic depends on — stored as <code>ConceptEdge</code> documents. Built once by keyword matching, read cheaply at chat time.</p>
+        <div class="tags"><span class="tag">knowledgeGraphService.js</span><span class="tag">conceptEdge.js</span></div>
+      </div>
+    </div>
+
+    <div class="stage is-llm">
+      <div class="num">6</div>
+      <div>
+        <h3>Answer, in scope &nbsp;<span class="file">chat-stream</span></h3>
+        <p>A chat bound to a section retrieves only that section's pages, semantic-ranked over the chunk embeddings. Depth-1 prerequisites from the graph lend a definition from an earlier, locked section — never its full text. That is the “don't overcross” guarantee.</p>
+        <div class="tags"><span class="tag">chatStreamController.js</span><span class="tag">scopedRetrievalService.js</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="note">
+    <b>One thing to get right:</b> page ranges are 1-based <b>PDF</b> page numbers, not the printed page labels inside the book. If they don't line up, the extracted range is off by the book's front-matter offset.
+  </div>
+</div>
