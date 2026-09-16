@@ -2,7 +2,7 @@
 
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Send, Share2, RotateCcw, Loader2, User, Bot, Copy, Check, Pencil, ChevronUp, X as XIcon } from "lucide-react";
+import { Send, Share2, RotateCcw, Loader2, User, Bot, Copy, Check, Pencil, ChevronUp, X as XIcon, BookOpen } from "lucide-react";
 import Markdown from "@/components/chat/Markdown";
 
 type Message = {
@@ -17,6 +17,22 @@ export default function ChatPage() {
     const fileId = searchParams?.get("fileId") || null;
     const folderId = searchParams?.get("folderId") || null;
     const fileName = searchParams?.get("fileName") ? decodeURIComponent(searchParams.get("fileName")!) : null;
+    const sectionIdParam = searchParams?.get("sectionId") || null;
+    const sectionTitleParam = searchParams?.get("sectionTitle") ? decodeURIComponent(searchParams.get("sectionTitle")!) : null;
+    const pageStartParam = searchParams?.get("pageStart") || null;
+    const pageEndParam = searchParams?.get("pageEnd") || null;
+
+    type SectionInfo = { id: string; title: string | null; pageStart?: number; pageEnd?: number } | null;
+    const [section, setSection] = useState<SectionInfo>(
+        sectionIdParam
+            ? {
+                  id: sectionIdParam,
+                  title: sectionTitleParam,
+                  pageStart: pageStartParam ? Number(pageStartParam) : undefined,
+                  pageEnd: pageEndParam ? Number(pageEndParam) : undefined,
+              }
+            : null
+    );
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState<string>("");
@@ -126,12 +142,14 @@ export default function ChatPage() {
         const initChatWithContext = async () => {
             try {
                 const token = localStorage.getItem("authToken");
-                const payload: { fileId?: string; folderId?: string; fileName?: string } = {};
+                const payload: { fileId?: string; folderId?: string; fileName?: string; sectionId?: string; sectionTitle?: string } = {};
                 if (fileId) payload.fileId = fileId;
                 if (folderId) payload.folderId = folderId;
                 if (fileName) payload.fileName = fileName;
+                if (sectionIdParam) payload.sectionId = sectionIdParam;
+                if (sectionTitleParam) payload.sectionTitle = sectionTitleParam;
 
-                await fetch(`${API_URL}/api/chat/${id}/init`, {
+                const res = await fetch(`${API_URL}/api/chat/${id}/init`, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
@@ -139,12 +157,18 @@ export default function ChatPage() {
                     },
                     body: JSON.stringify(payload),
                 });
+                // For chats opened without query params (e.g. from the sidebar),
+                // pick up the section stored on the session so the header shows it.
+                const data = await res.json().catch(() => null);
+                if (data?.success && data.sectionId) {
+                    setSection((prev) => prev || { id: data.sectionId, title: data.sectionTitle || null });
+                }
             } catch (err) {
                 console.error("Failed to init chat with context:", err);
             }
         };
         initChatWithContext();
-    }, [id, fileId, fileName, API_URL]);
+    }, [id, fileId, fileName, sectionIdParam, sectionTitleParam, API_URL]);
 
     // Optimistically tell the Sidebar this chat exists so it shows up immediately
     useEffect(() => {
@@ -224,6 +248,7 @@ export default function ChatPage() {
                     chatId: id,
                     ...(fileId && { fileId }),
                     ...(folderId && { folderId }),
+                    ...(section?.id && { sectionId: section.id }),
                 }),
             });
 
@@ -478,7 +503,18 @@ export default function ChatPage() {
                                             <span className="text-neutral-400 font-normal italic text-sm">New Chat</span>
                                         )}
                                     </h1>
-                                    <p className="text-neutral-600 text-xs font-mono">#{id?.slice(0, 8) || "new"}</p>
+                                    <div className="flex items-center gap-2">
+                                        <p className="text-neutral-600 text-xs font-mono">#{id?.slice(0, 8) || "new"}</p>
+                                        {section && (
+                                            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-950 px-2 py-0.5 text-[11px] text-indigo-300">
+                                                <BookOpen size={11} />
+                                                {section.title || "Section"}
+                                                {section.pageStart && section.pageEnd
+                                                    ? ` · p.${section.pageStart}–${section.pageEnd}`
+                                                    : ""}
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                                 <button
                                     onClick={startTitleRename}

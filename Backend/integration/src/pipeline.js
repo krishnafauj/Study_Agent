@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const pdfParse = require("pdf-parse");
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { CONFIG } from "./config.js";
 import { logger } from "./logger.js";
 import { sha256 } from "./utils.js";
@@ -14,10 +15,223 @@ function compactOutline(node) {
     title: node.title,
     level: node.level,
     summary: node.summary,
+    number: node.number || "",
     keyConcepts: node.keyConcepts || [],
     formulas: node.formulas || [],
     mcqs: node.mcqs || [],
+    // page metadata (undefined for the whole-document pipeline; set per section)
+    pageStart: node.pageStart,
+    pageEnd: node.pageEnd,
     children: kids,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-section extraction helpers (pdfjs-dist reads ONE page at a time, so we can
+// extract just a page range without ever parsing — or trimming — the whole PDF).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract text from ONLY pages [pageStart..pageEnd] of a PDF buffer.
+ * Returns { pages: [{ page, text }], totalPages, start, end } — one entry per
+ * page so chunks can carry accurate pageStart/pageEnd for access scoping.
+ */
+/** Fast page count without extracting text — used at upload time. */
+export async function getPdfPageCount(buffer) {
+  try {
+    const pdf = await pdfjsLib.getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+      disableFontFace: true,
+      verbosity: 0,
+    }).promise;
+    return pdf.numPages || 0;
+  } catch (err) {
+    logger.warn("PAGE_COUNT", `Failed: ${err.message}`);
+    return 0;
+  }
+}
+
+export async function extractPagesText(buffer, pageStart, pageEnd) {
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    useSystemFonts: true,
+    disableFontFace: true,
+    verbosity: 0,
+  });
+  const pdf = await loadingTask.promise;
+  const totalPages = pdf.numPages;
+
+  const start = Math.max(1, Number(pageStart) || 1);
+  const end = Math.min(Number(pageEnd) || totalPages, totalPages);
+
+  const pages = [];
+  for (let n = start; n <= end; n++) {
+    try {
+      const page = await pdf.getPage(n);
+      const content = await page.getTextContent({ normalizeWhitespace: true });
+      const text = content.items
+        .filter((it) => it.str && it.str.trim() !== "")
+        .map((it) => it.str)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      pages.push({ page: n, text });
+    } catch (err) {
+      logger.warn("SECTION_EXTRACT", `Page ${n} failed: ${err.message}`);
+      pages.push({ page: n, text: "" });
+    }
+  }
+  return { pages, totalPages, start, end };
+}
+
+/**
+ * Chunk page texts by max char length while tracking the page range each chunk
+ * spans. Prefers page boundaries; hard-splits a single oversized page.
+ * Returns [{ text, pageStart, pageEnd }].
+ */
+function chunkPagesByChars(pages, maxChars) {
+  const chunks = [];
+  let buf = "";
+  let pStart = null;
+  let pEnd = null;
+
+  const flush = () => {
+    const t = buf.trim();
+    if (t.length > 50) chunks.push({ text: t, pageStart: pStart, pageEnd: pEnd });
+    buf = "";
+    pStart = null;
+    pEnd = null;
+  };
+
+  for (const { page, text } of pages) {
+    if (!text) continue;
+
+    // Adding this page would overflow the current buffer — flush what we have.
+    if (buf.length && buf.length + text.length > maxChars) flush();
+    if (pStart === null) pStart = page;
+    pEnd = page;
+    buf += (buf ? "\n\n" : "") + text;
+
+    // A single page (or accumulated buffer) larger than maxChars → hard-split.
+    while (buf.length > maxChars) {
+      let splitPos = buf.lastIndexOf(". ", maxChars);
+      if (splitPos <= 0) splitPos = buf.lastIndexOf(" ", maxChars);
+      if (splitPos <= 0) splitPos = maxChars;
+      const piece = buf.slice(0, splitPos).trim();
+      if (piece.length > 50) chunks.push({ text: piece, pageStart: pStart, pageEnd: page });
+      buf = buf.slice(splitPos).trim();
+      pStart = page;
+      pEnd = page;
+    }
+  }
+  flush();
+  return chunks;
+}
+
+/**
+ * Parse ONLY a section's page range: extract → chunk → LLM structure → embed.
+ * Returns { outline, chunks, stats } with every node/chunk carrying the real
+ * pageStart/pageEnd it came from. Never parses the whole document.
+ */
+export async function processPageRange(buffer, opts = {}) {
+  const {
+    pageStart,
+    pageEnd,
+    sectionTitle = "",
+    embed = true,
+    progress = () => {},
+  } = opts;
+
+  progress({ status: "extracting", progress: 10, message: `Extracting pages ${pageStart}–${pageEnd}...` });
+  const { pages, start, end } = await extractPagesText(buffer, pageStart, pageEnd);
+
+  progress({ status: "chunking", progress: 25, message: "Chunking section text..." });
+  const pageChunks = chunkPagesByChars(pages, 4000);
+  const textChunks = pageChunks.map((c) => c.text);
+
+  if (!textChunks.length) {
+    progress({ status: "done", progress: 100, message: "No extractable text in this range." });
+    return { outline: [], chunks: [], stats: { totalChunks: 0, pages: end - start + 1, empty: true } };
+  }
+
+  progress({ status: "structuring", progress: 40, message: "Extracting structure with LLM..." });
+  const extractedJSONs = await processChunksConcurrently(textChunks);
+
+  progress({ status: "building_tree", progress: 80, message: "Assembling section tree..." });
+  const rootNodes = [];
+  const embeddableChunks = [];
+
+  for (let i = 0; i < pageChunks.length; i++) {
+    const { text: chunkText, pageStart: cs, pageEnd: ce } = pageChunks[i];
+    const json = extractedJSONs[i] || {};
+
+    const chapterNodeId = `sec_${start}_${i}`;
+    const chapterNode = {
+      id: chapterNodeId,
+      title: json.chapterTitle || sectionTitle || `Part ${i + 1}`,
+      level: 0,
+      summary: json.summary || "",
+      keyConcepts: json.keyConcepts || [],
+      formulas: json.formulas || [],
+      mcqs: json.mcqs || [],
+      pageStart: cs,
+      pageEnd: ce,
+      children: [],
+    };
+
+    if (json.topics && Array.isArray(json.topics)) {
+      json.topics.forEach((topic, tIdx) => {
+        const topicNode = {
+          id: `${chapterNodeId}_t${tIdx}`,
+          title: topic.title || "Topic",
+          level: 1,
+          pageStart: cs,
+          pageEnd: ce,
+          children: [],
+        };
+        if (topic.subtopics && Array.isArray(topic.subtopics)) {
+          topic.subtopics.forEach((sub, sIdx) => {
+            topicNode.children.push({
+              id: `${chapterNodeId}_t${tIdx}_s${sIdx}`,
+              title: sub.title || "Subtopic",
+              level: 2,
+              summary: sub.details || "",
+              pageStart: cs,
+              pageEnd: ce,
+              children: [],
+            });
+          });
+        }
+        chapterNode.children.push(topicNode);
+      });
+    }
+
+    rootNodes.push(chapterNode);
+
+    embeddableChunks.push({
+      nodeId: chapterNodeId,
+      text: chunkText,
+      title: chapterNode.title,
+      kind: "text",
+      contentType: "explanation",
+      pageStart: cs,
+      pageEnd: ce,
+    });
+  }
+
+  if (embed) {
+    progress({ status: "embedding", progress: 90, message: "Generating vector embeddings..." });
+    await embedChunks(embeddableChunks);
+  }
+
+  progress({ status: "done", progress: 100, message: "Section parsed." });
+  logger.info("PIPELINE", `Section pages ${start}-${end}: ${embeddableChunks.length} chunks.`);
+
+  return {
+    outline: rootNodes.map(compactOutline),
+    chunks: embeddableChunks,
+    stats: { totalChunks: embeddableChunks.length, pages: end - start + 1 },
   };
 }
 

@@ -2,14 +2,21 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Plus, MessageSquare, Trash2, Pencil, Check, X as XIcon, Loader2, RefreshCw, File, BookOpen, Zap, UserPlus, ChevronRight } from "lucide-react";
-import Link from "next/link";
+import {
+  ArrowLeft, Plus, MessageSquare, Trash2, Pencil, Check, X as XIcon, Loader2,
+  BookOpen, UserPlus, ChevronRight, CheckCircle2, AlertTriangle, ShieldCheck,
+} from "lucide-react";
 
-type Topic = {
+type ParseStatus = "unparsed" | "parsing" | "parsed" | "failed";
+type Section = {
   _id: string;
   title: string;
-  level: number;
-  children?: Topic[];
+  pageStart: number;
+  pageEnd: number;
+  parseStatus?: ParseStatus;
+  parseProgress?: number;
+  topicsCreated?: number;
+  mode?: "assign" | "see";
 };
 
 type Chat = {
@@ -18,12 +25,6 @@ type Chat = {
   updatedAt: string;
   fileId: string;
   fileName?: string;
-};
-
-type ProcessingProgress = {
-  progress: number;
-  status: string;
-  topicsCreated: number;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -39,38 +40,58 @@ export default function FileDashboardPage() {
   const fileId = params?.fileId as string;
 
   const [chats, setChats] = useState<Chat[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [fileName, setFileName] = useState<string>("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const [processingProgress, setProcessingProgress] = useState<ProcessingProgress | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
 
   const [fileInfo, setFileInfo] = useState<any>(null);
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignEmail, setAssignEmail] = useState("");
   const [isAssigning, setIsAssigning] = useState(false);
-  const [topics, setTopics] = useState<Topic[]>([]);
 
-  const fetchTopics = useCallback(async () => {
+  const [sections, setSections] = useState<Section[]>([]);
+  const [isOwner, setIsOwner] = useState<boolean>(true);
+
+  // Sections (the real page-range sections the owner created) + parse status.
+  const fetchSections = useCallback(async () => {
     if (!fileId) return;
     try {
-      const res = await fetch(`${API_URL}/api/topics/${fileId}`, {
+      const res = await fetch(`${API_URL}/api/access/${fileId}/overview`, {
         headers: authHeaders(),
       });
       const data = await res.json();
       if (data.success) {
-        // Only keep Level 0 or 1 for top-level cards (Chapters)
-        setTopics(data.topics || []);
+        setIsOwner(!!data.isOwner);
+        setSections(data.isOwner ? (data.sections || []) : (data.mySections || []));
+        if (!fileName && data.fileName) setFileName(data.fileName);
       }
     } catch (err) {
-      console.error("Failed to load topics:", err);
+      console.error("Failed to load sections:", err);
     }
+  }, [fileId, fileName]);
+
+  // Load everything in parallel and keep the whole page in a skeleton until it
+  // is ALL ready — so content appears at once instead of popping in piece by
+  // piece (which caused the "No sections yet" flash before the real cards).
+  useEffect(() => {
+    if (!fileId) return;
+    let alive = true;
+    (async () => {
+      await Promise.all([fetchSections(), fetchFileDetails(), fetchChats()]);
+      if (alive) setInitialLoading(false);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId]);
 
+  // While a section is still parsing, refresh so its status advances.
+  const anyParsing = sections.some((s) => s.parseStatus === "parsing");
   useEffect(() => {
-    fetchTopics();
-  }, [fetchTopics]);
+    if (!anyParsing) return;
+    const t = setInterval(() => fetchSections(), 4000);
+    return () => clearInterval(t);
+  }, [anyParsing, fetchSections]);
 
   const fetchFileDetails = useCallback(async () => {
     if (!fileId) return;
@@ -90,36 +111,9 @@ export default function FileDashboardPage() {
     }
   }, [fileId, fileName]);
 
-  useEffect(() => {
-    fetchFileDetails();
-  }, [fetchFileDetails]);
-
-  // Poll for processing progress
-  useEffect(() => {
-    if (!fileId) return;
-    
-    const pollInterval = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/topics/progress/${fileId}`, {
-          headers: authHeaders(),
-        });
-        const data = await res.json();
-        if (data.success) {
-          setProcessingProgress(data.progress);
-          setIsProcessing(data.progress?.status !== "completed" && data.progress?.status !== "failed");
-        }
-      } catch (err) {
-        console.error("Progress fetch error:", err);
-      }
-    }, 2000);
-
-    return () => clearInterval(pollInterval);
-  }, [fileId]);
-
   // Fetch chats for this file
   const fetchChats = useCallback(async () => {
     if (!fileId) return;
-    setIsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/chats/file/${fileId}`, {
         headers: authHeaders(),
@@ -133,19 +127,20 @@ export default function FileDashboardPage() {
       }
     } catch (err) {
       console.error("Failed to load chats:", err);
-    } finally {
-      setIsLoading(false);
     }
   }, [fileId]);
 
-  useEffect(() => {
-    fetchChats();
-  }, [fetchChats]);
-
-  // Create new chat for this file
-  const createNewChat = () => {
+  // Create new chat for this file (optionally scoped to a section)
+  const createNewChat = (sec?: Section) => {
     const newChatId = `chat-${Date.now()}`;
-    router.push(`/chat/${newChatId}?fileId=${fileId}&fileName=${encodeURIComponent(fileName)}`);
+    const q = new URLSearchParams({ fileId, fileName });
+    if (sec) {
+      q.set("sectionId", sec._id);
+      if (sec.title) q.set("sectionTitle", sec.title);
+      if (sec.pageStart) q.set("pageStart", String(sec.pageStart));
+      if (sec.pageEnd) q.set("pageEnd", String(sec.pageEnd));
+    }
+    router.push(`/chat/${newChatId}?${q.toString()}`);
   };
 
   // Rename chat
@@ -190,13 +185,6 @@ export default function FileDashboardPage() {
     }
   };
 
-  const getProgressColor = () => {
-    const progress = processingProgress?.progress || 0;
-    if (progress < 4) return "from-red-500 to-orange-500";
-    if (progress < 7) return "from-yellow-500 to-orange-500";
-    return "from-green-500 to-emerald-500";
-  };
-
   const handleAssign = async () => {
     if (!assignEmail.trim() || !fileInfo) return;
     setIsAssigning(true);
@@ -208,7 +196,7 @@ export default function FileDashboardPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Failed to assign");
-      
+
       setFileInfo({ ...fileInfo, assignedTo: data.assignedTo });
       setAssignEmail("");
     } catch (err) {
@@ -229,7 +217,7 @@ export default function FileDashboardPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Failed to revoke");
-      
+
       setFileInfo({ ...fileInfo, assignedTo: data.assignedTo });
     } catch (err) {
       console.error(err);
@@ -238,7 +226,7 @@ export default function FileDashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950 flex flex-col">
+    <div className="h-full overflow-y-auto bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950 flex flex-col">
       {/* Header */}
       <header className="border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-md sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -257,13 +245,6 @@ export default function FileDashboardPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <Link
-                href={`/topics/${fileId}`}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-semibold transition-all duration-200"
-              >
-                <BookOpen size={18} />
-                <span>View Topics</span>
-              </Link>
               {fileInfo?.isOwner !== false && (
                 <button
                   onClick={() => router.push(`/access/${fileId}`)}
@@ -275,7 +256,7 @@ export default function FileDashboardPage() {
                 </button>
               )}
               <button
-                onClick={createNewChat}
+                onClick={() => createNewChat()}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-semibold transition-all duration-200"
               >
                 <Plus size={18} />
@@ -287,91 +268,67 @@ export default function FileDashboardPage() {
       </header>
 
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        {/* Processing Progress Section */}
-        {processingProgress && (
-          <div className="mb-8 p-6 rounded-xl bg-neutral-900 border border-neutral-800">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <Zap size={20} className="text-yellow-500" />
-                <div>
-                  <h3 className="text-lg font-semibold text-white">Document Processing</h3>
-                  <p className="text-sm text-neutral-400">
-                    Status: <span className="capitalize text-yellow-400">{processingProgress.status}</span>
-                  </p>
-                </div>
-              </div>
-              {isProcessing && <Loader2 size={20} className="animate-spin text-blue-500" />}
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-neutral-300">Topics Extracted</span>
-                <span className="text-white font-semibold">{processingProgress.topicsCreated}</span>
-              </div>
-              
-              <div className="relative h-3 bg-neutral-800 rounded-full overflow-hidden">
-                <div
-                  className={`h-full bg-gradient-to-r ${getProgressColor()} transition-all duration-500`}
-                  style={{ width: `${(processingProgress.progress / 10) * 100}%` }}
-                />
-              </div>
-
-              <div className="flex justify-between text-xs text-neutral-400">
-                <span>Progress: {processingProgress.progress}/10</span>
-                <span>{Math.round((processingProgress.progress / 10) * 100)}%</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Chapters/Topics Grid */}
-        {topics && topics.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-4">
+        {initialLoading ? (
+          <PageSkeleton />
+        ) : (
+        <>
+        {/* Sections */}
+        <div className="mb-8">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <BookOpen size={24} className="text-blue-500" />
-              Document Structure
+              Sections
             </h2>
+            {isOwner && sections.length > 0 && (
+              <button
+                onClick={() => router.push(`/access/${fileId}`)}
+                className="text-sm font-medium text-blue-400 hover:text-blue-300 inline-flex items-center gap-1"
+              >
+                Manage sections <ChevronRight size={14} />
+              </button>
+            )}
+          </div>
+
+          {sections.length === 0 ? (
+            <div className="text-center py-12 bg-neutral-900/50 rounded-xl border border-dashed border-neutral-800">
+              <ShieldCheck size={44} className="mx-auto text-neutral-600 mb-4" />
+              <p className="text-neutral-300 font-medium mb-1">No sections yet</p>
+              <p className="text-neutral-500 text-sm mb-4 max-w-md mx-auto">
+                {isOwner
+                  ? "This document isn’t parsed as a whole. Create page-range sections and each one is parsed on its own."
+                  : "You haven’t been given access to any sections of this document yet."}
+              </p>
+              {isOwner && (
+                <button
+                  onClick={() => router.push(`/access/${fileId}`)}
+                  className="inline-flex items-center gap-2 px-6 py-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-500 hover:to-teal-700 text-white font-semibold transition-all duration-200"
+                >
+                  <Plus size={18} />
+                  Create Sections
+                </button>
+              )}
+            </div>
+          ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {topics.map((chapter) => (
-                <div key={chapter._id} className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-blue-500/50 transition-colors flex flex-col h-full group">
+              {sections.map((s) => (
+                <div
+                  key={s._id}
+                  className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-blue-500/50 transition-colors flex flex-col h-full group"
+                >
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-white mb-3 leading-snug group-hover:text-blue-400 transition-colors">
-                      {chapter.title}
-                    </h3>
-                    {chapter.children && chapter.children.length > 0 ? (
-                      <div className="space-y-2">
-                        {chapter.children.slice(0, 4).map(topic => (
-                          <div key={topic._id} className="text-sm text-neutral-300">
-                            <span className="font-medium text-neutral-400 mr-2">•</span>
-                            {topic.title}
-                            {topic.children && topic.children.length > 0 && (
-                              <div className="ml-4 mt-1 space-y-1">
-                                {topic.children.slice(0, 2).map(sub => (
-                                  <div key={sub._id} className="text-xs text-neutral-500 line-clamp-1">
-                                    - {sub.title}
-                                  </div>
-                                ))}
-                                {topic.children.length > 2 && (
-                                  <div className="text-xs text-neutral-600 italic">+{topic.children.length - 2} more subtopics</div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        {chapter.children.length > 4 && (
-                          <div className="text-sm text-blue-500/80 font-medium pt-2">
-                            +{chapter.children.length - 4} more topics...
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-neutral-500 italic">No topics found.</p>
-                    )}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h3 className="text-lg font-semibold text-white leading-snug group-hover:text-blue-400 transition-colors">
+                        {s.title}
+                      </h3>
+                      <SectionStatusBadge section={s} />
+                    </div>
+                    <p className="text-sm text-neutral-400">Pages {s.pageStart}–{s.pageEnd}</p>
                   </div>
                   <div className="mt-4 pt-4 border-t border-neutral-800 flex justify-end">
-                    <button 
-                      onClick={createNewChat}
-                      className="text-xs font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                    <button
+                      onClick={() => createNewChat(s)}
+                      disabled={s.parseStatus === "parsing"}
+                      className="text-xs font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1 disabled:opacity-40"
                     >
                       Chat about this <ChevronRight size={14} />
                     </button>
@@ -379,8 +336,8 @@ export default function FileDashboardPage() {
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Chats Section */}
         <div>
@@ -394,16 +351,12 @@ export default function FileDashboardPage() {
             </p>
           </div>
 
-          {isLoading ? (
-            <div className="flex justify-center py-12">
-              <Loader2 size={32} className="animate-spin text-blue-500" />
-            </div>
-          ) : chats.length === 0 ? (
+          {chats.length === 0 ? (
             <div className="text-center py-12 bg-neutral-900/50 rounded-xl border border-neutral-800">
               <MessageSquare size={48} className="mx-auto text-neutral-600 mb-4" />
               <p className="text-neutral-400 mb-4">No chats created yet</p>
               <button
-                onClick={createNewChat}
+                onClick={() => createNewChat()}
                 className="inline-flex items-center gap-2 px-6 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-semibold transition-all duration-200"
               >
                 <Plus size={18} />
@@ -487,6 +440,8 @@ export default function FileDashboardPage() {
             </div>
           )}
         </div>
+        </>
+        )}
       </main>
 
       {/* Assignment Modal */}
@@ -499,9 +454,9 @@ export default function FileDashboardPage() {
                 <XIcon size={20} />
               </button>
             </div>
-            
+
             <p className="text-gray-400 text-sm mb-4">
-              Assign <strong className="text-white">{fileInfo.fileName}</strong> to another user. 
+              Assign <strong className="text-white">{fileInfo.fileName}</strong> to another user.
               They will receive an email and can chat with the PDF topics (but cannot view the raw file).
               <br/>
               <span className="text-xs text-purple-400">Tip: You can add multiple emails separated by commas or spaces.</span>
@@ -516,7 +471,7 @@ export default function FileDashboardPage() {
                 onKeyDown={e => e.key === "Enter" && handleAssign()}
                 className="flex-1 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500 text-sm"
               />
-              <button 
+              <button
                 onClick={handleAssign}
                 disabled={isAssigning || !assignEmail.trim()}
                 className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
@@ -534,7 +489,7 @@ export default function FileDashboardPage() {
                   {fileInfo.assignedTo.map((email: string) => (
                     <li key={email} className="flex items-center justify-between bg-gray-950 px-3 py-2 rounded border border-gray-800">
                       <span className="text-sm text-gray-300">{email}</span>
-                      <button 
+                      <button
                         onClick={() => handleRevoke(email)}
                         className="text-xs text-red-400 hover:text-red-300 transition-colors"
                       >
@@ -550,4 +505,77 @@ export default function FileDashboardPage() {
       )}
     </div>
   );
+}
+
+function PageSkeleton() {
+  return (
+    <div className="animate-pulse">
+      {/* Sections skeleton */}
+      <div className="mb-8">
+        <div className="mb-4 h-6 w-40 rounded bg-neutral-800" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 h-[140px]">
+              <div className="h-5 w-1/2 rounded bg-neutral-800" />
+              <div className="mt-3 h-3 w-1/3 rounded bg-neutral-800/70" />
+              <div className="mt-8 h-3 w-24 ml-auto rounded bg-neutral-800/70" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Chats skeleton */}
+      <div>
+        <div className="mb-6 h-6 w-56 rounded bg-neutral-800" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <ChatCardSkeleton key={i} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatCardSkeleton() {
+  return (
+    <div className="p-4 rounded-xl bg-neutral-900 border border-neutral-800 animate-pulse">
+      <div className="mb-3">
+        <div className="h-4 w-2/3 rounded bg-neutral-800" />
+        <div className="mt-2 h-3 w-1/3 rounded bg-neutral-800/70" />
+      </div>
+      <div className="flex gap-2">
+        <div className="h-9 flex-1 rounded-lg bg-neutral-800" />
+        <div className="h-9 w-11 rounded-lg bg-neutral-800" />
+        <div className="h-9 w-11 rounded-lg bg-neutral-800" />
+      </div>
+    </div>
+  );
+}
+
+function SectionStatusBadge({ section }: { section: Section }) {
+  const status = section.parseStatus;
+  if (status === "parsing") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-950 px-2 py-0.5 text-xs text-amber-300">
+        <Loader2 className="animate-spin" size={11} />
+        {typeof section.parseProgress === "number" ? `${section.parseProgress}%` : "Parsing"}
+      </span>
+    );
+  }
+  if (status === "parsed") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-950 px-2 py-0.5 text-xs text-emerald-300">
+        <CheckCircle2 size={11} /> {section.topicsCreated ? `${section.topicsCreated}` : "Parsed"}
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-950 px-2 py-0.5 text-xs text-red-300">
+        <AlertTriangle size={11} /> Failed
+      </span>
+    );
+  }
+  return null;
 }

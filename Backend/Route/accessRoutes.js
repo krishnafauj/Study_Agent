@@ -19,8 +19,10 @@ import mongoose from "mongoose";
 import UserFile from "../models/userFile.js";
 import PermissionSection from "../models/permissionSection.js";
 import SectionGrant from "../models/sectionGrant.js";
+import Topic from "../models/topic.js";
 import { buildConceptEdges } from "../services/knowledgeGraphService.js";
 import { getScopedGraphContext } from "../services/scopedRetrievalService.js";
+import { parseSection } from "../services/sectionParseService.js";
 
 const router = express.Router();
 
@@ -28,7 +30,7 @@ const router = express.Router();
 
 async function loadFile(fileId) {
   if (!mongoose.isValidObjectId(fileId)) return null;
-  return UserFile.findById(fileId).select("_id userId fileName assignedTo").lean();
+  return UserFile.findById(fileId).select("_id userId fileName assignedTo s3Key").lean();
 }
 
 function callerEmail(req) {
@@ -165,11 +167,47 @@ router.post("/access/:fileId/sections", async (req, res) => {
       pageStart: Number(pageStart),
       pageEnd: Number(pageEnd),
       order: Number(order) || 0,
+      parseStatus: "parsing", // parsing kicks off immediately below
+      parseProgress: 0,
     });
+
+    // Respond right away; parse this section's pages in the background.
     res.json({ success: true, section });
+
+    parseSection(section._id).catch((e) =>
+      console.error(`[access] section ${section._id} parse failed:`, e.message)
+    );
   } catch (err) {
     console.error("[access] create section:", err.message);
-    res.status(500).json({ success: false, error: err.message });
+    if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Manually re-parse a section (retry after a failure, or after fixing pages).
+router.post("/access/:fileId/sections/:sectionId/reparse", async (req, res) => {
+  try {
+    const file = await loadFile(req.params.fileId);
+    if (!file) return res.status(404).json({ success: false, error: "File not found" });
+    if (!requireOwner(file, req, res)) return;
+
+    const section = await PermissionSection.findOne({
+      _id: req.params.sectionId,
+      fileId: String(file._id),
+    }).lean();
+    if (!section) return res.status(404).json({ success: false, error: "Section not found" });
+
+    await PermissionSection.updateOne(
+      { _id: section._id },
+      { parseStatus: "parsing", parseProgress: 0, parseError: null }
+    );
+    res.json({ success: true });
+
+    parseSection(section._id).catch((e) =>
+      console.error(`[access] section ${section._id} re-parse failed:`, e.message)
+    );
+  } catch (err) {
+    console.error("[access] reparse section:", err.message);
+    if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -180,6 +218,8 @@ router.delete("/access/:fileId/sections/:sectionId", async (req, res) => {
     if (!requireOwner(file, req, res)) return;
 
     await PermissionSection.deleteOne({ _id: req.params.sectionId, fileId: String(file._id) });
+    // Drop the topics/chunks that were parsed for this section.
+    await Topic.deleteMany({ sectionId: req.params.sectionId });
     // Pull the section out of every grant.
     await SectionGrant.updateMany(
       { fileId: String(file._id) },

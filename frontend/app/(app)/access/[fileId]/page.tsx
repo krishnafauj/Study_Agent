@@ -18,10 +18,22 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Plus, Trash2, Users, ShieldCheck, Network, Loader2, Eye, MessageSquare,
+  CheckCircle2, AlertTriangle, RefreshCw,
 } from "lucide-react";
 import api from "@/lib/axios/api";
 
-type Section = { _id: string; title: string; pageStart: number; pageEnd: number; order?: number };
+type ParseStatus = "unparsed" | "parsing" | "parsed" | "failed";
+type Section = {
+  _id: string;
+  title: string;
+  pageStart: number;
+  pageEnd: number;
+  order?: number;
+  parseStatus?: ParseStatus;
+  parseProgress?: number;
+  topicsCreated?: number;
+  parseError?: string | null;
+};
 type Mode = "none" | "assign" | "see";
 type MySection = Section & { mode: "assign" | "see" };
 
@@ -68,9 +80,17 @@ export default function ManageAccessPage() {
 
   useEffect(() => { if (fileId) load(); }, [fileId, load]);
 
+  // While any section is still parsing, quietly refresh so the badges advance.
+  const anyParsing = sections.some((s) => s.parseStatus === "parsing");
+  useEffect(() => {
+    if (!isOwner || !anyParsing) return;
+    const t = setInterval(() => { load(); }, 4000);
+    return () => clearInterval(t);
+  }, [isOwner, anyParsing, load]);
+
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="mx-auto max-w-4xl px-4 py-6">
+    <div className="h-full overflow-y-auto bg-black text-white">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-6">
         <button
           onClick={() => router.back()}
           className="mb-4 inline-flex items-center gap-1 text-sm text-gray-400 hover:text-white"
@@ -89,9 +109,7 @@ export default function ManageAccessPage() {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 text-gray-400">
-            <Loader2 className="animate-spin" size={16} /> Loading…
-          </div>
+          <AccessSkeleton />
         ) : isOwner === false ? (
           <StudentView sections={mySections} />
         ) : (
@@ -106,6 +124,58 @@ export default function ManageAccessPage() {
             setError={setError}
           />
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────── Loading skeleton ───────────────────────────
+
+function AccessSkeleton() {
+  return (
+    <div className="animate-pulse">
+      {/* Tabs */}
+      <div className="mb-6 flex gap-4 border-b border-gray-800 pb-3">
+        <div className="h-5 w-32 rounded bg-gray-800" />
+        <div className="h-5 w-40 rounded bg-gray-800/70" />
+      </div>
+
+      {/* Sections card */}
+      <div className="mb-6 rounded-xl border border-gray-800 bg-gray-950 p-4">
+        <div className="mb-4 h-5 w-48 rounded bg-gray-800" />
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between">
+              <div className="h-4 w-1/3 rounded bg-gray-800" />
+              <div className="h-6 w-24 rounded-full bg-gray-800/70" />
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 flex flex-wrap items-end gap-2">
+          <div className="h-9 flex-1 min-w-[160px] rounded-md bg-gray-800" />
+          <div className="h-9 w-20 rounded-md bg-gray-800" />
+          <div className="h-9 w-20 rounded-md bg-gray-800" />
+          <div className="h-9 w-20 rounded-md bg-gray-800" />
+        </div>
+      </div>
+
+      {/* Per-user card */}
+      <div className="rounded-xl border border-gray-800 bg-gray-950 p-4">
+        <div className="mb-4 h-5 w-52 rounded bg-gray-800" />
+        <div className="space-y-3">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-gray-800 bg-black p-3">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="h-4 w-40 rounded bg-gray-800" />
+                <div className="h-7 w-16 rounded-md bg-gray-800" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-4 w-full rounded bg-gray-800/60" />
+                <div className="h-4 w-5/6 rounded bg-gray-800/60" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -136,6 +206,46 @@ function StudentView({ sections }: { sections: MySection[] }) {
         <b>Assign</b> = you can chat about that section. <b>See</b> = view only.
       </p>
     </div>
+  );
+}
+
+function SectionStatus({ section, onReparse }: { section: Section; onReparse: () => void }) {
+  const status = section.parseStatus || "unparsed";
+
+  if (status === "parsing") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-950 px-2.5 py-1 text-xs text-amber-300">
+        <Loader2 className="animate-spin" size={12} />
+        Parsing{typeof section.parseProgress === "number" ? ` ${section.parseProgress}%` : "…"}
+      </span>
+    );
+  }
+  if (status === "parsed") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-950 px-2.5 py-1 text-xs text-emerald-300">
+        <CheckCircle2 size={12} /> Parsed{section.topicsCreated ? ` · ${section.topicsCreated} topics` : ""}
+      </span>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <button
+        onClick={onReparse}
+        title={section.parseError || "Parse failed — click to retry"}
+        className="inline-flex items-center gap-1 rounded-full bg-red-950 px-2.5 py-1 text-xs text-red-300 hover:bg-red-900"
+      >
+        <AlertTriangle size={12} /> Failed · retry
+      </button>
+    );
+  }
+  // unparsed (e.g. legacy section) — offer a manual parse
+  return (
+    <button
+      onClick={onReparse}
+      className="inline-flex items-center gap-1 rounded-full bg-gray-800 px-2.5 py-1 text-xs text-gray-300 hover:bg-gray-700"
+    >
+      <RefreshCw size={12} /> Parse
+    </button>
   );
 }
 
@@ -315,6 +425,15 @@ function PermissionsTab({ fileId, assignedTo, sections, grantByEmail, reload, se
     }
   }
 
+  async function reparseSection(id: string) {
+    try {
+      await api.post(`/api/access/${fileId}/sections/${id}/reparse`);
+      await reload();
+    } catch (err: any) {
+      setError(err?.response?.data?.error || "Could not re-parse section");
+    }
+  }
+
   async function suggestFromChapters() {
     try {
       const res = await api.get(`/api/topics/${fileId}`);
@@ -362,20 +481,24 @@ function PermissionsTab({ fileId, assignedTo, sections, grantByEmail, reload, se
 
         {sections.length === 0 && (
           <p className="mb-3 text-sm text-gray-500">
-            No sections yet. Add page ranges like 1–10, 11–20 — then set who can access each below.
+            No sections yet. Add page ranges like 1–10, 11–20. Each section is parsed on its
+            own the moment you add it — the whole PDF is never parsed at once.
           </p>
         )}
 
         <ul className="mb-4 divide-y divide-gray-800">
           {sections.map((s: Section) => (
-            <li key={s._id} className="flex items-center justify-between py-2">
+            <li key={s._id} className="flex items-center justify-between gap-3 py-2">
               <span className="text-sm">
                 <span className="font-medium">{s.title}</span>{" "}
                 <span className="text-gray-500">pages {s.pageStart}–{s.pageEnd}</span>
               </span>
-              <button onClick={() => deleteSection(s._id)} className="text-gray-500 hover:text-red-400">
-                <Trash2 size={16} />
-              </button>
+              <div className="flex items-center gap-3">
+                <SectionStatus section={s} onReparse={() => reparseSection(s._id)} />
+                <button onClick={() => deleteSection(s._id)} className="text-gray-500 hover:text-red-400">
+                  <Trash2 size={16} />
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -410,8 +533,9 @@ function PermissionsTab({ fileId, assignedTo, sections, grantByEmail, reload, se
       <section className="rounded-xl border border-gray-800 bg-gray-950 p-4">
         <h2 className="mb-1 font-medium">Permissions per user</h2>
         <p className="mb-4 text-xs text-gray-500">
-          For each assigned user, choose a mode per section. <b>Assign</b> = they can chat about it
-          (those pages get parsed). <b>See</b> = view topics only.
+          Sections are parsed when you create them, so their topics are ready either way.
+          Per user, choose a mode per section: <b>Assign</b> = they can chat about it.
+          <b> See</b> = view topics only, no chat.
         </p>
 
         {assignedTo.length === 0 ? (

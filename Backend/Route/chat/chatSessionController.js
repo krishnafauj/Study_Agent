@@ -11,14 +11,16 @@ export const initChat = async (req, res) => {
   try {
     const { chatId } = req.params;
     const userId = req.user.userId;
-    const { fileId, folderId, fileName } = req.body || {};
+    const { fileId, folderId, fileName, sectionId, sectionTitle } = req.body || {};
 
     const updateData = { $setOnInsert: { title: "New Chat" } };
-    
+
     // Add file/folder context if provided
     if (fileId) updateData.$setOnInsert.fileId = fileId;
     if (folderId) updateData.$setOnInsert.folderId = folderId;
     if (fileName) updateData.$setOnInsert.fileName = fileName;
+    if (sectionId) updateData.$setOnInsert.sectionId = sectionId;
+    if (sectionTitle) updateData.$setOnInsert.sectionTitle = sectionTitle;
 
     const session = await ChatSession.findOneAndUpdate(
       { chatId, userId },
@@ -32,6 +34,8 @@ export const initChat = async (req, res) => {
       fileId: session.fileId,
       folderId: session.folderId,
       fileName: session.fileName,
+      sectionId: session.sectionId,
+      sectionTitle: session.sectionTitle,
     });
 
   } catch (error) {
@@ -60,7 +64,7 @@ export const getChatSessions = async (req, res) => {
 
     const sessions = await ChatSession.find(query)
       .sort({ updatedAt: -1 })
-      .select("chatId title updatedAt createdAt fileId folderId fileName")
+      .select("chatId title updatedAt createdAt fileId folderId fileName sectionId sectionTitle")
       .lean();
 
     // Organize chats by file/folder
@@ -113,7 +117,7 @@ export const getChatsByFile = async (req, res) => {
 
     const sessions = await ChatSession.find({ userId, fileId })
       .sort({ updatedAt: -1 })
-      .select("chatId title updatedAt createdAt fileName fileId")
+      .select("chatId title updatedAt createdAt fileName fileId sectionId sectionTitle")
       .lean();
 
     res.json({

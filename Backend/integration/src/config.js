@@ -5,7 +5,10 @@ export const CONFIG = {
   // ── Models ─────────────────────────────────
   llm: {
     provider: "groq",
-    model: "llama-3.1-8b-instant",
+    // Groq retired llama-3.1-8b-instant; gpt-oss-20b is its drop-in replacement
+    // (131K context, tool calling + JSON mode). Use openai/gpt-oss-120b for more
+    // intelligence when answer quality matters more than latency/cost.
+    model: "openai/gpt-oss-20b",
     temperature: 0,
     maxTokens: 4000,
     // Groq requests/min are generous but finite — cap concurrency.

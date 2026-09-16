@@ -280,28 +280,53 @@ export default function Sidebar() {
     }
   }
 
-  // Create new chat in a specific file
-  const handleCreateChatInFile = (fileId: string, fileName: string) => {
-    const newChatId = `chat-${Date.now()}`
-    router.push(`/chat/${newChatId}?fileId=${fileId}&fileName=${encodeURIComponent(fileName)}`)
-    setMobileOpen(false)
+  // ─── Section picker modal (choose which section a new chat is about) ─────────
+  type ModalSection = {
+    _id: string
+    title: string
+    pageStart: number
+    pageEnd: number
+    parseStatus?: 'unparsed' | 'parsing' | 'parsed' | 'failed'
+    topicsCreated?: number
+    mode?: 'assign' | 'see'
   }
+  const [sectionModal, setSectionModal] = useState<{ fileId: string; fileName: string } | null>(null)
+  const [modalSections, setModalSections] = useState<ModalSection[]>([])
+  const [modalLoading, setModalLoading] = useState(false)
 
-  // Delete file
-  const handleDeleteFile = async (fileId: string) => {
-    if (!confirm('Delete this file? All associated chats will be deleted.')) return
+  const openSectionModal = async (fileId: string, fileName: string) => {
+    setSectionModal({ fileId, fileName })
+    setModalSections([])
+    setModalLoading(true)
     try {
-      const res = await fetch(`${API_URL}/api/files/${fileId}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-      })
-      if (res.ok) {
-        setFiles(prev => prev.filter(f => f._id !== fileId))
-        setChats(prev => prev.filter(c => c.fileId !== fileId))
+      const res = await fetch(`${API_URL}/api/access/${fileId}/overview`, { headers: authHeaders() })
+      const data = await res.json()
+      if (data.success) {
+        setModalSections(data.isOwner ? (data.sections || []) : (data.mySections || []))
       }
     } catch (err) {
-      console.error('Delete file failed:', err)
+      console.error('Failed to load sections:', err)
+    } finally {
+      setModalLoading(false)
     }
+  }
+
+  // A section can be chatted with when its pages are parsed (owner) or it was
+  // granted in "assign" mode (invited user).
+  const isSectionChatReady = (s: ModalSection) =>
+    s.mode ? s.mode === 'assign' : s.parseStatus === 'parsed'
+
+  const startSectionChat = (s: ModalSection) => {
+    if (!sectionModal || !isSectionChatReady(s)) return
+    const newChatId = `chat-${Date.now()}`
+    const q = new URLSearchParams({ fileId: sectionModal.fileId, fileName: sectionModal.fileName })
+    q.set('sectionId', s._id)
+    if (s.title) q.set('sectionTitle', s.title)
+    if (s.pageStart) q.set('pageStart', String(s.pageStart))
+    if (s.pageEnd) q.set('pageEnd', String(s.pageEnd))
+    setSectionModal(null)
+    setMobileOpen(false)
+    router.push(`/chat/${newChatId}?${q.toString()}`)
   }
 
   const menuItems = [
@@ -572,22 +597,12 @@ export default function Sidebar() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            handleCreateChatInFile(fileId, file.fileName)
+                            openSectionModal(fileId, file.fileName)
                           }}
                           className="p-1.5 rounded hover:bg-purple-600/20 text-neutral-400 hover:text-purple-400 transition-colors"
-                          title="Create new chat"
+                          title="New chat in a section"
                         >
                           <Plus size={14} />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDeleteFile(fileId)
-                          }}
-                          className="p-1.5 rounded hover:bg-red-500/20 text-neutral-400 hover:text-red-400 transition-colors"
-                          title="Delete file"
-                        >
-                          <Trash2 size={14} />
                         </button>
                       </div>
                     </div>
@@ -706,10 +721,10 @@ export default function Sidebar() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            handleCreateChatInFile(fileId, file.fileName)
+                            openSectionModal(fileId, file.fileName)
                           }}
                           className="p-1.5 rounded hover:bg-purple-600/20 text-neutral-400 hover:text-purple-400 transition-colors"
-                          title="Create new chat"
+                          title="New chat in a section"
                         >
                           <Plus size={14} />
                         </button>
@@ -812,6 +827,76 @@ export default function Sidebar() {
         </div>
 
       </aside>
+
+      {/* SECTION PICKER MODAL */}
+      {sectionModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setSectionModal(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-neutral-700 bg-neutral-900 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-1 flex items-center justify-between">
+              <h3 className="text-white font-semibold">Start a chat in a section</h3>
+              <button onClick={() => setSectionModal(null)} className="text-neutral-400 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="mb-4 text-xs text-neutral-500 truncate">{sectionModal.fileName}</p>
+
+            {modalLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="animate-spin text-purple-400" size={22} />
+              </div>
+            ) : modalSections.length === 0 ? (
+              <div className="py-6 text-center text-sm text-neutral-500">
+                No sections yet. Create sections from Manage Access to chat about them.
+              </div>
+            ) : (
+              <div className="max-h-80 space-y-2 overflow-y-auto">
+                {modalSections.map((s) => {
+                  const ready = isSectionChatReady(s)
+                  const label = s.mode
+                    ? (s.mode === 'assign' ? 'Assigned' : 'View only')
+                    : s.parseStatus === 'parsed'
+                      ? (s.topicsCreated ? `${s.topicsCreated} topics` : 'Ready')
+                      : s.parseStatus === 'parsing'
+                        ? 'Parsing…'
+                        : s.parseStatus === 'failed'
+                          ? 'Failed'
+                          : 'Not parsed'
+                  return (
+                    <button
+                      key={s._id}
+                      onClick={() => startSectionChat(s)}
+                      disabled={!ready}
+                      className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                        ready
+                          ? 'border-neutral-700 bg-neutral-950 hover:border-purple-500 hover:bg-neutral-800 cursor-pointer'
+                          : 'border-neutral-800 bg-neutral-950/50 opacity-60 cursor-not-allowed'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-white truncate">{s.title}</span>
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
+                            ready ? 'bg-emerald-950 text-emerald-300' : 'bg-neutral-800 text-neutral-400'
+                          }`}
+                        >
+                          {label}
+                        </span>
+                      </div>
+                      <span className="text-xs text-neutral-500">Pages {s.pageStart}–{s.pageEnd}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   )
 }

@@ -33,6 +33,18 @@ const chatSessionSchema = new mongoose.Schema(
       default: null, // Store filename for quick display
     },
 
+    // Which page-range section this chat was started for (per-section parsing).
+    // null = whole-file / unscoped chat.
+    sectionId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    sectionTitle: {
+      type: String,
+      default: null, // stored for quick display in the chat header
+    },
+
     // Auto-generated from the first user message (first 60 chars)
     title: {
       type: String,

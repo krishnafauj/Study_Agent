@@ -31,6 +31,18 @@ export async function uploadFileToS3(fileBuffer, originalName, userId) {
   return key;
 }
 
+// Download a file's raw bytes from S3 as a Buffer (used for per-section parsing).
+// Uses the same credentials as upload, so it works wherever upload already does.
+export async function getFileBuffer(s3Key) {
+  const s3 = getS3Client();
+  const cmd = new GetObjectCommand({
+    Bucket: process.env.S3_BUCKET,
+    Key: s3Key,
+  });
+  const res = await s3.send(cmd);
+  return Buffer.from(await res.Body.transformToByteArray());
+}
+
 export async function getFileDownloadUrl(s3Key) {
   const s3 = getS3Client();
   const cmd = new GetObjectCommand({

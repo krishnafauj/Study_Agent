@@ -6,7 +6,7 @@ import Topic from "../models/topic.js";
 import { uploadFileToS3, getFileDownloadUrl, deleteFileFromS3 } from "../services/s3Service.js";
 import ProcessingProgress from "../models/processingProgress.js";
 import { extractFirstPageText, deriveDynamicFileName } from "../services/namingService.js";
-import { processBuffer } from "../integration/src/pipeline.js";
+import { getPdfPageCount } from "../integration/src/pipeline.js";
 import User from "../models/user.js";
 import { sendAssignmentEmail } from "../services/emailService.js";
 
@@ -98,242 +98,79 @@ router.post("/files/upload", upload.single("file"), async (req, res) => {
     console.log(`🔍 [DEDUP] Checking database for duplicate...`);
     const existingFile = await UserFile.findOne({ fileHash });
     
+    // NOTE: We no longer parse the whole PDF at upload. Parsing happens
+    // per-section (when the owner creates a section) — see accessRoutes.js +
+    // sectionParseService.js. Upload just stores the file and its page count.
+
     if (existingFile) {
-      console.log(`✨ [DEDUP] Found duplicate! File ID: ${existingFile._id}`);
-      console.log(`📚 [DEDUP] Reusing ${await Topic.countDocuments({ fileId: existingFile._id })} existing topics`);
-      
-      // Create a new UserFile entry that references the same topics
+      console.log(`✨ [DEDUP] Found duplicate — reusing S3 object of ${existingFile._id}`);
+
       const userFile = await UserFile.create({
         userId,
-        fileName: dynamicFileName, // Use dynamic name instead of existing or original
-        s3Key: existingFile.s3Key, // Reuse S3 key
+        fileName: dynamicFileName,
+        s3Key: existingFile.s3Key, // Reuse S3 key (same bytes)
         fileSize: req.file.size,
-        fileHash, // Store the hash
+        fileHash,
       });
 
-      console.log(`✅ [DEDUP] Created new file entry (ID: ${userFile._id}) reusing topics from ${existingFile._id}`);
-
-      // Copy topics from existing file to this new file entry
-      console.log(`📋 [DEDUP] Copying topics to new file entry...`);
-      const existingTopics = await Topic.find({ fileId: existingFile._id }).lean();
-      // Pass 1: create copies and map old _id -> new _id
-      const idMap = new Map();
-      const created = [];
-      for (const t of existingTopics) {
-        const nt = await Topic.create({
-          fileId: userFile._id,
-          userId,
-          level: t.level,
-          parentTopicId: null, // fixed in pass 2
-          title: t.title,
-          summary: t.summary,
-          content: t.content,
-          embedding: t.embedding,
-          order: t.order,
-          number: t.number || "",
-          contentType: t.contentType || "",
-          isChunk: t.isChunk || false,
-          pageStart: t.pageStart || 0,
-          pageEnd: t.pageEnd || 0,
-        });
-        idMap.set(String(t._id), nt._id);
-        created.push({ nt, oldParent: t.parentTopicId });
-      }
-      // Pass 2: remap parent links to the NEW copies (was pointing at the original file's ids)
-      for (const { nt, oldParent } of created) {
-        if (oldParent && idMap.has(String(oldParent))) {
-          nt.parentTopicId = idMap.get(String(oldParent));
-          await nt.save();
-        }
-      }
-      const copiedTopics = created;
-      console.log(`✅ [DEDUP] Copied ${copiedTopics.length} topics`);
-
-      // Mark as completed immediately since we reused
+      // Sections (and therefore parsing) are per-file and defined later, so we
+      // do NOT copy topics. Record page count so section ranges can be validated.
+      const totalPages = await getPdfPageCount(req.file.buffer);
       await ProcessingProgress.findOneAndUpdate(
         { fileId: userFile._id },
         {
           fileId: userFile._id,
           userId,
           fileName: userFile.fileName,
-          status: "completed",
-          progress: 10,
-          topicsCreated: copiedTopics.length,
-          totalTopics: copiedTopics.length,
+          status: "completed", // no document-level processing to wait on
+          progress: 100,
+          totalPages,
+          topicsCreated: 0,
+          totalTopics: 0,
           completedAt: new Date(),
         },
         { upsert: true, new: true }
       );
 
-      console.log(`🎉 [DEDUP] Processing complete (reused)!\n`);
-      return res.status(201).json({ 
-        success: true, 
+      console.log(`✅ [DEDUP] File ${userFile._id} ready (${totalPages} pages). Define sections to parse.\n`);
+      return res.status(201).json({
+        success: true,
         file: userFile,
         deduped: true,
-        message: "File deduplicated and topics reused"
+        message: "File ready — create sections to parse pages",
       });
     }
 
-    // Step 3: New file - proceed with full processing
-    console.log(`🆕 [DEDUP] This is a new file, proceeding with full processing...`);
+    // New file — upload bytes, store page count, and wait for sections.
+    console.log(`🆕 [UPLOAD] New file — storing without full parse...`);
     const key = await uploadFileToS3(req.file.buffer, dynamicFileName, userId);
+    const totalPages = await getPdfPageCount(req.file.buffer);
     const userFile = await UserFile.create({
       userId,
       fileName: dynamicFileName,
       s3Key: key,
       fileSize: req.file.size,
-      fileHash, // Store the hash for future deduplication
+      fileHash,
     });
 
-    console.log(`✅ [UPLOAD] File created (ID: ${userFile._id})`);
+    await ProcessingProgress.findOneAndUpdate(
+      { fileId: userFile._id },
+      {
+        fileId: userFile._id,
+        userId,
+        fileName: userFile.fileName,
+        status: "completed", // parsing is deferred to per-section, nothing to run now
+        progress: 100,
+        totalPages,
+        topicsCreated: 0,
+        totalTopics: 0,
+        completedAt: new Date(),
+      },
+      { upsert: true, new: true }
+    );
 
-    // Auto-start PDF processing for embeddings
-    (async () => {
-      try {
-        console.log(`\n🚀 [UPLOAD] Auto-processing started for: ${userFile.fileName}`);
-        
-        await ProcessingProgress.findOneAndUpdate(
-          { fileId: userFile._id },
-          {
-            fileId: userFile._id,
-            userId,
-            fileName: userFile.fileName,
-            status: "pending",
-            progress: 0,
-            topicsCreated: 0,
-            error: null,
-          },
-          { upsert: true, new: true }
-        );
-        
-        // Progress callback for auto-processing
-        const progressCallback = async (data) => {
-          console.log(`⏳ [AUTO-PROCESS] ${data.status} - Progress: ${data.progress}% - ${data.message || ""}`);
-          await ProcessingProgress.updateOne(
-            { fileId: userFile._id },
-            {
-              status: data.status,
-              progress: data.progress,
-              topicsCreated: data.topicsCreated || 0,
-            }
-          );
-        };
-        
-        // 🚨 FIX: Await the hierarchy processor to get the results back!
-        console.log(`⏳ [UPLOAD] Calling processBuffer...`);
-        const result = await processBuffer(req.file.buffer, {
-          fileName: userFile.fileName,
-          refineOutline: true,
-          useLlmContentType: true,
-          embed: true,
-          progress: progressCallback
-        });
-
-        console.log(`✅ [UPLOAD] processBuffer returned ${result.stats.totalChunks} chunks`);
-
-        // 🚨 FIX: Actually save the results to MongoDB!
-        console.log(`\n💾 [UPLOAD-DB] Starting database insertion...`);
-        let inserted = 0;
-        const nodeMap = new Map();
-
-        const insertOutline = async (nodes, parentId = null) => {
-          for (const node of nodes) {
-            try {
-              console.log(`  📝 [UPLOAD-DB] Creating outline node: "${node.title}" (level: ${node.level})`);
-              const newTopic = await Topic.create({
-                fileId: userFile._id,
-                userId,
-                level: node.level,
-                parentTopicId: parentId,
-                title: node.title,
-                summary: node.summary || "",
-                content: node.title, // Outline nodes don't have large text
-                keyConcepts: node.keyConcepts || [],
-                formulas: node.formulas || [],
-                mcqs: node.mcqs || [],
-                embedding: [],
-                order: inserted,
-                number: node.number || "",
-                isChunk: false,
-                pageStart: node.pageStart || 0,
-                pageEnd: node.pageEnd || 0,
-              });
-              nodeMap.set(node.id, newTopic._id);
-              inserted++;
-
-              if (node.children && node.children.length > 0) {
-                await insertOutline(node.children, newTopic._id);
-              }
-            } catch (err) {
-              console.error(`  ❌ [UPLOAD-DB] Failed to insert outline "${node.title}": ${err.message}`);
-            }
-          }
-        };
-
-        const insertChunks = async (chunks) => {
-          for (const chunk of chunks) {
-            try {
-              const parentId = nodeMap.get(chunk.nodeId) || null;
-              // Make chunks a child of their corresponding outline node
-              const newTopic = await Topic.create({
-                fileId: userFile._id,
-                userId,
-                level: 99, // Distinguishes leaf chunks from structural nodes
-                parentTopicId: parentId,
-                title: chunk.title || "Content Chunk",
-                summary: chunk.kind || "text",
-                content: chunk.text,
-                embedding: chunk.embedding || [],
-                order: inserted,
-                isChunk: true,
-                contentType: chunk.contentType || "",
-                pageStart: chunk.pageStart || 0,
-                pageEnd: chunk.pageEnd || 0,
-              });
-              inserted++;
-            } catch (err) {
-              console.error(`  ❌ [UPLOAD-DB] Failed to insert chunk: ${err.message}`);
-            }
-          }
-        };
-
-        // Execute the save
-        await insertOutline(result.outline);
-        await insertChunks(result.chunks);
-        const totalSaved = inserted;
-        console.log(`✅ [UPLOAD-DB] Saved ${totalSaved} topics to MongoDB\n`);
-
-        // Mark progress as fully completed
-        await ProcessingProgress.updateOne(
-          { fileId: userFile._id },
-          {
-            status: "completed",
-            progress: 100,
-            totalTopics: totalSaved,
-            topicsCreated: totalSaved,
-            completedAt: new Date(),
-          }
-        );
-
-        console.log(`\n${"=".repeat(80)}`);
-        console.log(`✅ [UPLOAD] PDF Processing Complete!`);
-        console.log(`📊 Total Chunks: ${result.stats.totalChunks}`);
-        console.log(`💾 Total Saved: ${totalSaved}`);
-        console.log(`${"=".repeat(80)}\n`);
-
-      } catch (err) {
-        console.error(`\n❌ [UPLOAD] Auto-processing error:`, err.message);
-        await ProcessingProgress.updateOne(
-          { fileId: userFile._id },
-          {
-            status: "failed",
-            error: err.message,
-          }
-        );
-      }
-    })();
-
-    res.status(201).json({ success: true, file: userFile, deduped: false });
+    console.log(`✅ [UPLOAD] File ${userFile._id} stored (${totalPages} pages). Define sections to parse.`);
+    res.status(201).json({ success: true, file: userFile, deduped: false, totalPages });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: error.message });

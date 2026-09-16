@@ -12,6 +12,14 @@ const topicSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // Which PermissionSection produced this topic/chunk (per-section parsing).
+    // null for topics created by the legacy whole-document pipeline.
+    sectionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PermissionSection",
+      default: null,
+      index: true,
+    },
     // Hierarchical structure
     level: {
       type: Number, // 0 = main topic, 1 = subtopic, 2 = sub-subtopic, etc.

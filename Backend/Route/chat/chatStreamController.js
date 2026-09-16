@@ -30,7 +30,7 @@ import PermissionSection from "../../models/permissionSection.js";
 // which may borrow out-of-range prerequisites from the knowledge graph WITHOUT
 // overcrossing. The file owner keeps the original full-file behaviour.
 // ─────────────────────────────────────────────────────────────────────────────
-async function buildSystemPrompt({ message, fileId, conversationSummary, userId, userEmail }) {
+async function buildSystemPrompt({ message, fileId, sectionId, conversationSummary, userId, userEmail }) {
 
   let topicsBlock = "";
   let weakBlock = "";
@@ -85,9 +85,13 @@ async function buildSystemPrompt({ message, fileId, conversationSummary, userId,
         : `\n## Topics Needing Attention (Under 70%)\n${weakLines}\n`;
     }
 
-    // 3. RAG — scoped for granted (non-owner) users, full for the owner.
+    // 3. RAG — scoped to the chat's section (if any), then by ownership/grant.
+    //    ranges === null  → owner, whole file (no section chosen)
+    //    ranges === []    → no access / nothing parsed → no context
+    //    ranges === [..]  → restrict retrieval to those page ranges
     let chunks = [];
     let mode = "vector";
+    let ranges = null;
 
     const file = await UserFile.findById(fileId).select("userId").lean();
     const isOwner = file && String(file.userId) === String(userId);
@@ -105,39 +109,51 @@ async function buildSystemPrompt({ message, fileId, conversationSummary, userId,
       }).lean();
 
       if (grant) {
-        // Only "assign"-mode sections are parsed into chat; "see" sections are
-        // view-only and never fed to the model.
-        const assignIds = (grant.sections || [])
+        // Only "assign"-mode sections are chat-enabled; "see" sections are view-only.
+        let assignIds = (grant.sections || [])
           .filter((s) => s.mode === "assign")
-          .map((s) => s.sectionId);
+          .map((s) => String(s.sectionId));
+        // If this chat is bound to one section, narrow to it (must be granted).
+        if (sectionId) assignIds = assignIds.filter((id) => id === String(sectionId));
         const secs = await PermissionSection.find({ _id: { $in: assignIds } })
           .select("pageStart pageEnd")
           .lean();
-        const scoped = await getScopedGraphContext(
-          message,
-          fileId,
-          secs.map((s) => ({ pageStart: s.pageStart, pageEnd: s.pageEnd })),
-          { limit: 6, prereqCap: 3 }
-        );
-        chunks = scoped.primary;
-        mode = `scoped:${scoped.mode}`;
-
-        if (scoped.prerequisites.length > 0) {
-          const pr = scoped.prerequisites
-            .map((p, i) => `[Background ${i + 1}] ${p.title}: ${p.definition}`)
-            .join("\n");
-          // Borrowed from earlier in the book — reference only, clearly separated.
-          prereqBlock =
-            `\n## Background from earlier in the book (reference only — do NOT expand beyond the student's approved sections)\n${pr}\n`;
-        }
+        ranges = secs.map((s) => ({ pageStart: s.pageStart, pageEnd: s.pageEnd }));
+      } else {
+        ranges = []; // no grant ⇒ no access
       }
-      // No grant ⇒ chunks stays [] ⇒ the existing "no context" rules apply.
-    } else {
-      // Owner (or file lookup failed): original full-file behaviour.
+    } else if (isOwner && sectionId) {
+      // Owner chatting inside a specific section → scope to that section's pages.
+      const sec = await PermissionSection.findOne({ _id: sectionId, fileId: String(fileId) })
+        .select("pageStart pageEnd")
+        .lean();
+      ranges = sec ? [{ pageStart: sec.pageStart, pageEnd: sec.pageEnd }] : [];
+    }
+    // else: owner, no section → ranges stays null (whole file).
+
+    if (ranges === null) {
+      // Owner, whole file: original structure-aware behaviour.
       const r = await getStructuredContext(message, fileId, 6);
       chunks = r.chunks;
       mode = r.mode;
+    } else if (ranges.length) {
+      const scoped = await getScopedGraphContext(message, fileId, ranges, {
+        limit: 6,
+        prereqCap: 3,
+      });
+      chunks = scoped.primary;
+      mode = `scoped:${scoped.mode}`;
+
+      if (scoped.prerequisites.length > 0) {
+        const pr = scoped.prerequisites
+          .map((p, i) => `[Background ${i + 1}] ${p.title}: ${p.definition}`)
+          .join("\n");
+        // Borrowed from earlier in the book — reference only, clearly separated.
+        prereqBlock =
+          `\n## Background from earlier in the book (reference only — do NOT expand beyond the student's approved sections)\n${pr}\n`;
+      }
     }
+    // ranges === [] ⇒ chunks stays [] ⇒ existing "no context" rules apply.
 
     if (chunks.length > 0) {
       const chunkText = chunks
@@ -197,25 +213,28 @@ export const chatStreamHandler = async (req, res) => {
       chatId,
       fileId: bodyFileId,
       folderId: bodyFolderId,
+      sectionId: bodySectionId,
     } = req.body;
     const userId = req.user.userId;
 
     console.log("------ New Streaming Chat ------");
-    console.log(`chatId: ${chatId} | fileId: ${bodyFileId} | folderId: ${bodyFolderId}`);
+    console.log(`chatId: ${chatId} | fileId: ${bodyFileId} | folderId: ${bodyFolderId} | sectionId: ${bodySectionId}`);
 
-    // ─── Resolve fileId (body → ChatSession fallback) ────────────────────
+    // ─── Resolve fileId + sectionId (body → ChatSession fallback) ─────────
     let fileId = bodyFileId || null;
     let folderId = bodyFolderId || null;
+    let sectionId = bodySectionId || null;
 
-    if (!fileId && !folderId) {
+    if (!fileId && !folderId || !sectionId) {
       const session = await ChatSession.findOne({ chatId, userId })
-        .select("fileId folderId")
+        .select("fileId folderId sectionId")
         .lean();
       if (session) {
-        fileId = session.fileId || null;
-        folderId = session.folderId || null;
+        fileId = fileId || session.fileId || null;
+        folderId = folderId || session.folderId || null;
+        sectionId = sectionId || session.sectionId || null;
         if (fileId || folderId) {
-          console.log(`📎 Context from ChatSession — fileId: ${fileId} | folderId: ${folderId}`);
+          console.log(`📎 Context from ChatSession — fileId: ${fileId} | folderId: ${folderId} | sectionId: ${sectionId}`);
         }
       }
     }
@@ -249,6 +268,7 @@ export const chatStreamHandler = async (req, res) => {
     const systemPromptText = await buildSystemPrompt({
       message,
       fileId: resolvedFileId,
+      sectionId,                 // scope retrieval to this section when present
       conversationSummary: context.summary,
       userId,                    // caller identity — decides owner vs. scoped path
       userEmail: req.user?.email, // may be undefined; falls back to grantedToUserId
@@ -424,6 +444,7 @@ If NO knowledge exchange happened (e.g. just asking for explanation, general que
       $setOnInsert: {
         ...(contextFileId && { fileId: contextFileId }),
         ...(folderId && { folderId }),
+        ...(sectionId && { sectionId }),
       }
     };
     if (finalTitle) {
