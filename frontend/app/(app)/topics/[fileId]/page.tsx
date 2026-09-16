@@ -491,12 +491,7 @@ function MindMap({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function BookNode({ topic, depth = 0, searchQuery = "" }: { topic: Topic; depth?: number; searchQuery?: string }) {
-  const [expanded, setExpanded] = useState(depth === 0);
-  
-  // Force expand if search query matches something inside
-  useEffect(() => {
-    if (searchQuery) setExpanded(true);
-  }, [searchQuery]);
+  const [expanded, setExpanded] = useState(depth === 0 || !!searchQuery);
 
   const hasChildren = topic.children && topic.children.length > 0;
   

@@ -39,50 +39,71 @@ async function buildSystemPrompt({ message, fileId, sectionId, conversationSumma
 
   if (fileId) {
 
-    // 1. Folder context — all topics + marks
-    const ctx = await getFolderContext(fileId);
+    // 1. Topic list — scoped to the chat's SECTION when there is one, so the
+    //    model never advertises topics it has no content for. Only when the
+    //    chat is whole-file do we list every topic + performance marks.
+    if (sectionId) {
+      const secTopics = await Topic.find({
+        fileId,
+        sectionId,
+        isChunk: { $ne: true },
+      })
+        .sort({ level: 1, order: 1 })
+        .select("title level")
+        .lean();
 
-    if (ctx && ctx.topics.length > 0) {
-      const topicLines = ctx.topics
-        .filter((t) => t.level === 0) // only top-level topics for scoping
+      const topicLines = secTopics
+        .filter((t) => (t.level ?? 0) <= 1) // chapters + their topics
         .map((t, i) => `${i + 1}. ${t.title}`)
         .join("\n");
 
       if (topicLines) {
-        topicsBlock = `\n## Topics in Student's Study Material (${ctx.fileName})\n${topicLines}\n`;
+        topicsBlock = `\n## Topics in this section\n${topicLines}\n`;
       }
+      console.log(`📚 [Context] Section ${sectionId} | Topics: ${secTopics.length}`);
+    } else {
+      // Whole-file chat: full topic list + performance marks + weak topics.
+      const ctx = await getFolderContext(fileId);
 
-      // Performance marks (if any exist)
-      const attempted = ctx.topics.filter(
-        (t) => t.performanceScore !== null && t.performanceScore !== undefined
-      );
-      if (attempted.length > 0) {
-        const perfLines = attempted
-          .map((t) => `  - ${t.title}: ${Number(t.performanceScore).toFixed(1)}%`)
+      if (ctx && ctx.topics.length > 0) {
+        const topicLines = ctx.topics
+          .filter((t) => t.level === 0)
+          .map((t, i) => `${i + 1}. ${t.title}`)
           .join("\n");
-        topicsBlock += `\n## Student's Performance\n${perfLines}\n`;
+
+        if (topicLines) {
+          topicsBlock = `\n## Topics in Student's Study Material (${ctx.fileName})\n${topicLines}\n`;
+        }
+
+        const attempted = ctx.topics.filter(
+          (t) => t.performanceScore !== null && t.performanceScore !== undefined
+        );
+        if (attempted.length > 0) {
+          const perfLines = attempted
+            .map((t) => `  - ${t.title}: ${Number(t.performanceScore).toFixed(1)}%`)
+            .join("\n");
+          topicsBlock += `\n## Student's Performance\n${perfLines}\n`;
+        }
+
+        console.log(`📚 [Context] File: "${ctx.fileName}" | Topics: ${ctx.totalTopics} | Performance data: ${ctx.hasPerformanceData}`);
       }
 
-      console.log(`📚 [Context] File: "${ctx.fileName}" | Topics: ${ctx.totalTopics} | Performance data: ${ctx.hasPerformanceData}`);
-    }
+      const { weakTopics, source } = await getWeakTopics(fileId, 70);
+      if (weakTopics.length > 0) {
+        const weakLines = weakTopics
+          .slice(0, 10)
+          .map((t) => {
+            const score = t.performanceScore !== null && t.performanceScore !== undefined
+              ? `${Number(t.performanceScore).toFixed(1)}%`
+              : "not attempted yet";
+            return `  - ${t.topicName} (${score})`;
+          })
+          .join("\n");
 
-    // 2. Weak topics
-    const { weakTopics, source } = await getWeakTopics(fileId, 70);
-
-    if (weakTopics.length > 0) {
-      const weakLines = weakTopics
-        .slice(0, 10) // cap at 10
-        .map((t) => {
-          const score = t.performanceScore !== null && t.performanceScore !== undefined
-            ? `${Number(t.performanceScore).toFixed(1)}%`
-            : "not attempted yet";
-          return `  - ${t.topicName} (${score})`;
-        })
-        .join("\n");
-
-      weakBlock = source === "not_attempted"
-        ? `\n## Topics the Student Has Not Studied Yet\n${weakLines}\n`
-        : `\n## Topics Needing Attention (Under 70%)\n${weakLines}\n`;
+        weakBlock = source === "not_attempted"
+          ? `\n## Topics the Student Has Not Studied Yet\n${weakLines}\n`
+          : `\n## Topics Needing Attention (Under 70%)\n${weakLines}\n`;
+      }
     }
 
     // 3. RAG — scoped to the chat's section (if any), then by ownership/grant.
