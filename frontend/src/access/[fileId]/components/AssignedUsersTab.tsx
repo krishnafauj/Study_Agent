@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, Users, FileSpreadsheet } from "lucide-react";
 import { assignUser, revokeUser } from "../services";
+import { BulkAssignModal } from "./BulkAssignModal";
 
 export function AssignedUsersTab({
   fileId, assignedTo, reload, setError,
@@ -14,6 +15,7 @@ export function AssignedUsersTab({
 }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  const [bulkMode, setBulkMode] = useState<"group" | "excel" | null>(null);
 
   async function assign(e: React.FormEvent) {
     e.preventDefault();
@@ -62,6 +64,24 @@ export function AssignedUsersTab({
         </button>
       </form>
 
+      <div className="-mt-2 mb-4 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-gray-500">Or assign many at once:</span>
+        <button
+          type="button"
+          onClick={() => setBulkMode("group")}
+          className="inline-flex items-center gap-1.5 rounded-md border border-purple-800/50 bg-purple-900/20 px-3 py-1.5 text-xs text-purple-300 hover:bg-purple-900/40"
+        >
+          <Users size={13} /> By group
+        </button>
+        <button
+          type="button"
+          onClick={() => setBulkMode("excel")}
+          className="inline-flex items-center gap-1.5 rounded-md border border-green-800/50 bg-green-900/20 px-3 py-1.5 text-xs text-green-400 hover:bg-green-900/40"
+        >
+          <FileSpreadsheet size={13} /> From Excel
+        </button>
+      </div>
+
       <h3 className="mb-2 text-sm font-medium text-gray-300">Assigned Users</h3>
       {assignedTo.length === 0 ? (
         <p className="text-xs text-gray-500">Not assigned to anyone yet.</p>
@@ -76,6 +96,16 @@ export function AssignedUsersTab({
             </li>
           ))}
         </ul>
+      )}
+
+      {bulkMode && (
+        <BulkAssignModal
+          fileId={fileId}
+          mode={bulkMode}
+          assignedTo={assignedTo}
+          onClose={() => setBulkMode(null)}
+          onDone={reload}
+        />
       )}
     </div>
   );

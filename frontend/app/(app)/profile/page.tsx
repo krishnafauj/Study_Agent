@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Download, Trash2, Pencil, Check, X, Upload, RefreshCw, UserPlus, User as UserIcon, FileText, Share2 } from "lucide-react";
+import { Download, Trash2, Pencil, Check, X, RefreshCw, UserPlus, User as UserIcon, FileText, Share2, Users } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
@@ -29,12 +28,9 @@ const authHeaders = (): Record<string, string> => {
 };
 
 export default function ProfilePage() {
-  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [docs, setDocs] = useState<DocRecord[]>([]);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [message, setMessage] = useState<string>("");
+  const [, setMessage] = useState<string>("");
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState<string>("");
 
@@ -73,45 +69,6 @@ export default function ProfilePage() {
     loadDocs();
   }, []);
 
-  const onUpload = async () => {
-    if (!selectedFile) {
-      setMessage("Choose a PDF file first.");
-      return;
-    }
-    if (selectedFile.type !== "application/pdf") {
-      setMessage("Only PDF is allowed.");
-      return;
-    }
-
-    setUploading(true);
-    setMessage("");
-
-    try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-
-      const res = await fetch(`${API_URL}/api/files/upload`, {
-        method: "POST",
-        headers: { ...authHeaders() },
-        body: formData,
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Upload failed");
-      }
-
-      const data = await res.json();
-      setMessage(`Uploaded: ${data.file.fileName}`);
-      setSelectedFile(null);
-      window.dispatchEvent(new CustomEvent("fileUploaded", { detail: data.file }));
-      await loadDocs();
-    } catch (err) {
-      console.error(err);
-      setMessage(`Upload failed: ${(err as Error).message}`);
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const onDelete = async (docId: string) => {
     if (!confirm("Delete this file?")) return;
@@ -214,19 +171,6 @@ export default function ProfilePage() {
     }
   };
 
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-    }
-  };
 
   const myDocs = docs.filter(d => d.isOwner !== false);
   const assignedDocs = docs.filter(d => d.isOwner === false);
@@ -242,20 +186,30 @@ export default function ProfilePage() {
             <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2">My Profile</h1>
             <p className="text-gray-400">Manage your account and uploaded PDFs</p>
           </div>
-          <button
-            onClick={loadDocs}
-            disabled={isLoading}
-            className="p-3 bg-gray-900 hover:bg-gray-800 text-white rounded-full transition-colors"
-            title="Refresh Files"
-          >
-            <RefreshCw size={20} className={isLoading ? "animate-spin" : ""} />
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/profile/groups"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-purple-900/30 text-purple-300 border border-purple-800/50 hover:bg-purple-900/50 transition-colors text-sm font-medium"
+            >
+              <Users size={16} />
+              Student Groups
+            </Link>
+            <button
+              onClick={loadDocs}
+              disabled={isLoading}
+              className="p-3 bg-gray-900 hover:bg-gray-800 text-white rounded-full transition-colors"
+              title="Refresh Files"
+            >
+              <RefreshCw size={20} className={isLoading ? "animate-spin" : ""} />
+            </button>
+          </div>
         </div>
 
         {/* Profile Card */}
         {userProfile && (
           <div className="rounded-xl border border-gray-800 bg-gradient-to-br from-gray-950 to-gray-900 p-6 sm:p-8 flex items-center gap-6 shadow-xl">
             {userProfile.profilePicture ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img 
                 src={userProfile.profilePicture} 
                 alt="Profile" 
@@ -300,7 +254,7 @@ export default function ProfilePage() {
             <div className="text-center py-12 text-gray-400">Loading your documents...</div>
           ) : myDocs.length === 0 ? (
             <div className="rounded-xl border border-gray-800 bg-gray-950 p-12 text-center">
-              <p className="text-gray-400">You haven't uploaded any PDFs yet.</p>
+              <p className="text-gray-400">You haven&apos;t uploaded any PDFs yet.</p>
             </div>
           ) : (
             <div className="space-y-3">

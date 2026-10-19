@@ -7,7 +7,8 @@ import mongoose from "mongoose";
  * sub-parts (sections), each at a specific permission mode".
  *
  *   mode "assign" → the section's pages ARE parsed; the student can chat about it.
- *   mode "see"    → the student can view the section's topics/outline read-only;
+ *   mode "full"   → like "assign" (chat) AND the student can read those PDF pages.
+ *   mode "see"    → (legacy) the student can view the section's topics/outline read-only;
  *                   it is NOT parsed into chat.
  *
  * One document per (file, invited user). The server always derives a caller's
@@ -22,7 +23,7 @@ const grantedSectionSchema = new mongoose.Schema(
     },
     mode: {
       type: String,
-      enum: ["assign", "see"],
+      enum: ["assign", "see", "full"],
       default: "assign",
     },
   },

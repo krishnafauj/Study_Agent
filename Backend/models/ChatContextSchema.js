@@ -16,6 +16,10 @@ const ChatContextSchema = new mongoose.Schema({
 
   summary: String,
 
+  // Fingerprint of the caller's section access when this memory was written.
+  // If the owner changes permissions, memory is reset so old answers don't leak.
+  accessSig: { type: String, default: null },
+
   recentMessages: [
     {
       role: String,

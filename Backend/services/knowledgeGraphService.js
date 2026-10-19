@@ -112,6 +112,9 @@ export async function buildConceptEdges(fileId, opts = {}) {
     if (!B.text || B.text.trim().length < 20) continue;
     for (const A of enriched) {
       if (A.node._id.equals(B.node._id)) continue;
+      // Prerequisites are CONCEPTS (outline nodes with real titles/keyConcepts),
+      // not raw chunks titled "Content Chunk".
+      if (A.node.isChunk) continue;
       if (!isEarlier(A.node, B.node)) continue;
       let weight = 0;
       const evidence = [];
@@ -201,7 +204,7 @@ export async function getPrerequisites(fileId, toTopicIds, opts = {}) {
     relation: "prerequisite",
     toTopicId: { $in: toTopicIds },
   })
-    .select("fromTopicId weight evidence")
+    .select("fromTopicId toTopicId weight evidence")
     .lean();
 
   if (!edges.length) return [];
@@ -210,8 +213,9 @@ export async function getPrerequisites(fileId, toTopicIds, opts = {}) {
   const agg = new Map();
   for (const e of edges) {
     const k = String(e.fromTopicId);
-    const cur = agg.get(k) || { fromTopicId: e.fromTopicId, weight: 0, evidence: [] };
+    const cur = agg.get(k) || { fromTopicId: e.fromTopicId, weight: 0, evidence: [], dependents: [] };
     cur.weight += e.weight || 1;
+    cur.dependents.push(String(e.toTopicId));
     if (e.evidence?.length) cur.evidence.push(...e.evidence);
     agg.set(k, cur);
   }
@@ -220,7 +224,7 @@ export async function getPrerequisites(fileId, toTopicIds, opts = {}) {
   const ids = top.map((t) => t.fromTopicId);
 
   const prereqNodes = await Topic.find({ _id: { $in: ids } })
-    .select("_id title summary content keyConcepts pageStart pageEnd number")
+    .select("_id title summary content keyConcepts pageStart pageEnd number sectionId isChunk")
     .lean();
   const nodeById = new Map(prereqNodes.map((n) => [String(n._id), n]));
 
@@ -229,6 +233,7 @@ export async function getPrerequisites(fileId, toTopicIds, opts = {}) {
       topic: nodeById.get(String(t.fromTopicId)),
       weight: t.weight,
       evidence: [...new Set(t.evidence)].slice(0, 5),
+      dependents: [...new Set(t.dependents)], // in-scope node ids that need this prereq
     }))
     .filter((r) => r.topic);
 }

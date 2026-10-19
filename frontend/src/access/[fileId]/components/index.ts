@@ -7,3 +7,5 @@ export * from "./AssignedUsersTab";
 export * from "./UserPermissionCard";
 export * from "./PermissionsTab";
 export * from "./OwnerView";
+export * from "./BulkAssignModal";
+export * from "./PermissionsMatrix";

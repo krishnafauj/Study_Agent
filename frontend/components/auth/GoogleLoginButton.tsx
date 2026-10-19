@@ -22,7 +22,7 @@ const router = useRouter();
         window.google.accounts.id.initialize({
           client_id: clientId,
 
-          callback: async (response: any) => {
+          callback: async (response) => {
 
             try {
 
@@ -58,7 +58,7 @@ const router = useRouter();
               router.push("/home");
 
             } catch (error) {
-              console.error("Login error:", error);
+              console.warn("Login error:", error);
             }
           },
         });
@@ -73,7 +73,7 @@ const router = useRouter();
 
     }, 100);
 
-  }, []);
+  }, [router]);
 
   return <div id="googleBtn"></div>;
 }

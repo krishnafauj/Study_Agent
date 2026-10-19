@@ -21,6 +21,7 @@ import Topic from "../models/topic.js";
 import PermissionSection from "../models/permissionSection.js";
 import { getFileBuffer } from "./s3Service.js";
 import { processPageRange } from "../integration/src/pipeline.js";
+import { buildConceptEdges } from "./knowledgeGraphService.js";
 
 /**
  * Parse a single section by id. Idempotent: re-running clears the section's old
@@ -56,7 +57,9 @@ export async function parseSection(sectionId) {
       `\n📖 [SECTION-PARSE] "${section.title}" pages ${section.pageStart}-${section.pageEnd} (file ${file._id})`
     );
 
+    console.log(`   ↓ fetching PDF from S3 (${file.s3Key})…`);
     const buffer = await getFileBuffer(file.s3Key);
+    console.log(`   ✓ got ${buffer.length} bytes from S3`);
 
     const result = await processPageRange(buffer, {
       pageStart: section.pageStart,
@@ -64,12 +67,15 @@ export async function parseSection(sectionId) {
       sectionTitle: section.title,
       embed: true,
       progress: async (d) => {
+        // Log each stage so a stall is visible in the terminal.
+        console.log(`   … [${section.title}] ${d.status} ${d.progress}%${d.message ? " — " + d.message : ""}`);
         await PermissionSection.updateOne(
           { _id: section._id },
           { parseProgress: Math.round(d.progress || 0) }
         ).catch(() => {});
       },
     });
+    console.log(`   ✓ processPageRange returned ${result.stats.totalChunks} chunks`);
 
     // ── Save outline nodes + leaf chunks, stamped with sectionId ──
     let inserted = 0;
@@ -142,6 +148,12 @@ export async function parseSection(sectionId) {
     );
 
     console.log(`✅ [SECTION-PARSE] "${section.title}" → ${inserted} topics saved\n`);
+
+    // Rebuild the file's prerequisite graph so cross-section edges
+    // (e.g. topic 3 → needs → topic 2) exist for tiered chat. Background, non-fatal.
+    buildConceptEdges(String(file._id), { useLlm: false })
+      .then((g) => console.log(`🕸️  [GRAPH] ${g.edges} edges over ${g.nodes} nodes`))
+      .catch((e) => console.warn(`🕸️  [GRAPH] rebuild failed: ${e.message}`));
     return { topicsCreated: inserted };
   } catch (err) {
     console.error(`❌ [SECTION-PARSE] "${section.title}" failed:`, err.message);

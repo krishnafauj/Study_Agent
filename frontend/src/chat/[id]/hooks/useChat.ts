@@ -62,7 +62,7 @@ export function useChat(id: string, ctx: ChatContextParams) {
         setHasMore(more);
         setHistoryPage(page);
       } catch (err) {
-        console.error("Failed to load history:", err);
+        console.warn("Failed to load history:", err);
       }
     },
     [id]
@@ -74,7 +74,7 @@ export function useChat(id: string, ctx: ChatContextParams) {
       const t = await apiFetchTitle(id);
       if (t) setChatTitle(t);
     } catch (err) {
-      console.error("Failed to load chat title:", err);
+      console.warn("Failed to load chat title:", err);
     }
   }, [id]);
 
@@ -110,7 +110,7 @@ export function useChat(id: string, ctx: ChatContextParams) {
           setSection((prev) => prev || { id: data.sectionId, title: data.sectionTitle || null });
         }
       } catch (err) {
-        console.error("Failed to init chat with context:", err);
+        console.warn("Failed to init chat with context:", err);
       }
     })();
   }, [id, fileId, folderId, fileName, sectionId, sectionTitle]);

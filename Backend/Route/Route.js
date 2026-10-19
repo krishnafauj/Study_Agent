@@ -18,6 +18,7 @@ import topicRoutes from "./topicRoutes.js";
 import suggestionRoutes from "./suggestionRoutes.js";
 import recordsRoutes from "./recordsRoutes.js";
 import accessRoutes from "./accessRoutes.js";
+import groupRoutes from "./groupRoutes.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 console.log("Route loaded");
 router.use("/auth", authRoutes);
@@ -39,6 +40,9 @@ router.use(recordsRoutes);
 
 // Page-range access + knowledge-graph endpoints
 router.use(accessRoutes);
+
+// Student groups (reusable student lists)
+router.use(groupRoutes);
 
 // Chat streaming
 router.post("/chat-stream", chatStreamHandler);

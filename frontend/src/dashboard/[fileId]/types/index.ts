@@ -10,7 +10,7 @@ export type Section = {
   parseStatus?: ParseStatus;
   parseProgress?: number;
   topicsCreated?: number;
-  mode?: "assign" | "see";
+  mode?: "assign" | "see" | "full";
 };
 
 export type Chat = {

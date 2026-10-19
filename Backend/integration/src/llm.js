@@ -6,6 +6,7 @@ import { ChatGroq } from "@langchain/groq";
 import { CONFIG } from "./config.js";
 import { logger } from "./logger.js";
 import { withRetry, safeJsonParse } from "./utils.js";
+import { lfCallbacks } from "../../services/langfuse.js";
 
 let _model = null;
 function model() {
@@ -26,10 +27,13 @@ function model() {
 
 export async function llmText(system, user, { label = "LLM" } = {}) {
   return withRetry(async () => {
-    const res = await model().invoke([
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ]);
+    const res = await model().invoke(
+      [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      { callbacks: lfCallbacks(), runName: label }
+    );
     return String(res?.content ?? "").trim();
   }, { label });
 }
@@ -46,7 +50,7 @@ export async function llmJson(system, user, { label = "LLM-JSON", fallback = nul
         { role: "system", content: sys },
         { role: "user", content: user },
       ],
-      { response_format: { type: "json_object" } } // Groq supports JSON mode
+      { response_format: { type: "json_object" }, callbacks: lfCallbacks(), runName: label } // Groq supports JSON mode
     );
     return String(res?.content ?? "").trim();
   }, { label });

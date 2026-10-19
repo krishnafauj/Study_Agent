@@ -72,6 +72,7 @@ export default function ProfileFileStoragePage() {
 
   useEffect(() => {
     loadDocs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onUpload = async () => {

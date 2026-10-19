@@ -4,3 +4,4 @@ export * from "./ChatHeader";
 export * from "./MessageBubble";
 export * from "./StreamingBubble";
 export * from "./ChatInput";
+export * from "./PdfReaderPanel";

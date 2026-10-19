@@ -79,18 +79,7 @@ function authHeaders() {
   return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
-// ─── Flatten topics ────────────────────────────────────────────────────────────
-function flattenTopics(topics: Topic[]): Topic[] {
-  const result: Topic[] = [];
-  function walk(list: Topic[]) {
-    for (const t of list) {
-      result.push(t);
-      if (t.children?.length) walk(t.children);
-    }
-  }
-  walk(topics);
-  return result;
-}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MIND MAP COMPONENT

@@ -28,7 +28,9 @@ export function useDashboard(fileId: string) {
   const [renameValue, setRenameValue] = useState("");
 
   const fileNameRef = useRef("");
-  fileNameRef.current = fileName;
+  useEffect(() => {
+    fileNameRef.current = fileName;
+  }, [fileName]);
 
   const loadSections = useCallback(async () => {
     if (!fileId) return;

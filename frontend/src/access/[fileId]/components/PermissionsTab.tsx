@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { Plus, Trash2, Loader2, Network } from "lucide-react";
 import { SectionStatus } from "./SectionStatus";
-import { UserPermissionCard } from "./UserPermissionCard";
+import { PermissionsMatrix } from "./PermissionsMatrix";
 import { buildGraph, createSection, deleteSection, getTopics, reparseSection } from "../services";
 import type { GrantByEmail, Section } from "../types";
 
@@ -152,8 +152,8 @@ export function PermissionsTab({
         <h2 className="mb-1 font-medium">Permissions per user</h2>
         <p className="mb-4 text-xs text-gray-500">
           Sections are parsed when you create them, so their topics are ready either way.
-          Per user, choose a mode per section: <b>Assign</b> = they can chat about it.
-          <b> See</b> = view topics only, no chat.
+          Tick users to change many at once, or use a column&apos;s dropdown to set that section for everyone.
+          <b> Assign</b> = they can chat about it. <b>Assign fully</b> = chat + read those PDF pages.
         </p>
 
         {assignedTo.length === 0 ? (
@@ -161,19 +161,17 @@ export function PermissionsTab({
         ) : sections.length === 0 ? (
           <p className="text-sm text-gray-500">Add at least one section above.</p>
         ) : (
-          <div className="space-y-4">
-            {assignedTo.map((mail) => (
-              <UserPermissionCard
-                key={mail}
-                fileId={fileId}
-                email={mail}
-                sections={sections}
-                initial={grantByEmail[mail] || {}}
-                setError={setError}
-                reload={reload}
-              />
-            ))}
-          </div>
+          <PermissionsMatrix
+            // Remount (reset edits) only when users, section ids or saved grants change —
+            // not on the parse-progress polling that refreshes section objects.
+            key={JSON.stringify([assignedTo, sections.map((x) => x._id), grantByEmail])}
+            fileId={fileId}
+            users={assignedTo}
+            sections={sections}
+            grantByEmail={grantByEmail}
+            reload={reload}
+            setError={setError}
+          />
         )}
       </section>
 

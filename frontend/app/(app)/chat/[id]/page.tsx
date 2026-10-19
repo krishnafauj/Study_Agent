@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Loader2, Bot, ChevronUp } from "lucide-react";
-import { useChat } from "@/src/chat/[id]/hooks";
+import { useChat, useReadableSections } from "@/src/chat/[id]/hooks";
+import { ENABLE_PDF_READER } from "@/src/chat/[id]/constants";
 import {
-  ScrollbarStyle, ScoreToastCard, ChatHeader, MessageBubble, StreamingBubble, ChatInput,
+  ScrollbarStyle, ScoreToastCard, ChatHeader, MessageBubble, StreamingBubble, ChatInput, PdfReaderPanel,
 } from "@/src/chat/[id]/components";
 
 export default function ChatPage() {
@@ -57,12 +59,18 @@ export default function ChatPage() {
 
   const busy = isLoading || isStreaming;
 
+  // PDF reader: only sections this user may read (owner: all; student: "full" mode)
+  const fileId = searchParams?.get("fileId") || null;
+  const readable = useReadableSections(ENABLE_PDF_READER ? fileId : null);
+  const [isReading, setIsReading] = useState(false);
+
   return (
     <div className="h-[100dvh] bg-neutral-950 p-2 md:p-4 font-sans flex flex-col w-full">
       {scoreToast && <ScoreToastCard toast={scoreToast} onClose={() => setScoreToast(null)} />}
       <ScrollbarStyle />
 
-      <div className="flex-1 w-full bg-neutral-900 border border-neutral-800 rounded-2xl flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 w-full flex gap-2 md:gap-4">
+      <div className="flex-1 min-w-0 bg-neutral-900 border border-neutral-800 rounded-2xl flex flex-col overflow-hidden">
         <ChatHeader
           id={id}
           chatTitle={chatTitle}
@@ -75,6 +83,9 @@ export default function ChatPage() {
           onSubmitRename={submitTitleRename}
           onStartRename={startTitleRename}
           onShare={handleShare}
+          canRead={ENABLE_PDF_READER && readable.length > 0}
+          isReading={isReading}
+          onToggleRead={() => setIsReading((v) => !v)}
         />
 
         <main className="flex-1 overflow-y-auto w-full p-4 md:p-6 custom-scrollbar scroll-smooth">
@@ -137,6 +148,16 @@ export default function ChatPage() {
           isBusy={busy}
           onSend={() => handleSend(input)}
         />
+      </div>
+
+      {isReading && fileId && readable.length > 0 && (
+        <PdfReaderPanel
+          fileId={fileId}
+          sections={readable}
+          initialSectionId={section?.id}
+          onClose={() => setIsReading(false)}
+        />
+      )}
       </div>
     </div>
   );

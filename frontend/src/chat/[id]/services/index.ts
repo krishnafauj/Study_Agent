@@ -2,7 +2,7 @@
 // module owns the plain request wrappers.
 
 import { API_URL, HISTORY_PAGE_SIZE } from "../constants";
-import type { Message } from "../types";
+import type { Message, ReadableSection } from "../types";
 
 function token(): string {
   return (typeof window !== "undefined" ? localStorage.getItem("authToken") : "") || "";
@@ -67,4 +67,32 @@ export function openChatStream(body: Record<string, unknown>): Promise<Response>
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token()}` },
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * Sections whose PDF pages the caller may read: every section for the owner,
+ * only "full"-mode sections for invited users.
+ */
+export async function getReadableSections(fileId: string): Promise<ReadableSection[]> {
+  const res = await fetch(`${API_URL}/api/access/${fileId}/my-scope`, {
+    headers: { Authorization: `Bearer ${token()}` },
+  });
+  const data = await res.json().catch(() => null);
+  if (!data?.success) return [];
+  const list = (data.sections || []) as (ReadableSection & { mode?: string })[];
+  return list
+    .filter((s) => data.isOwner || s.mode === "full")
+    .map(({ _id, title, pageStart, pageEnd }) => ({ _id, title, pageStart, pageEnd }));
+}
+
+/** Download just one section's pages as a PDF blob (server cuts the page range). */
+export async function fetchSectionPdf(fileId: string, sectionId: string): Promise<Blob> {
+  const res = await fetch(`${API_URL}/api/access/${fileId}/sections/${sectionId}/pdf`, {
+    headers: { Authorization: `Bearer ${token()}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Could not load these pages");
+  }
+  return res.blob();
 }

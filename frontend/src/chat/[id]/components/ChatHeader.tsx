@@ -1,13 +1,13 @@
 "use client";
 
 import React, { RefObject } from "react";
-import { Share2, Pencil, Check, X as XIcon, BookOpen } from "lucide-react";
+import { Share2, Pencil, Check, X as XIcon, BookOpen, BookOpenText } from "lucide-react";
 import type { SectionInfo } from "../types";
 
 export function ChatHeader({
   id, chatTitle, section,
   isRenamingTitle, setIsRenamingTitle, renameValue, setRenameValue, titleInputRef,
-  onSubmitRename, onStartRename, onShare,
+  onSubmitRename, onStartRename, onShare, canRead = false, isReading = false, onToggleRead,
 }: {
   id: string;
   chatTitle: string;
@@ -20,6 +20,10 @@ export function ChatHeader({
   onSubmitRename: () => void;
   onStartRename: () => void;
   onShare: () => void;
+  /** Show the "Read" button (user may open some PDF pages of this book). */
+  canRead?: boolean;
+  isReading?: boolean;
+  onToggleRead?: () => void;
 }) {
   return (
     <header className="flex justify-between items-center px-4 py-3 md:px-6 md:py-4 bg-neutral-900 border-b border-neutral-800 shrink-0">
@@ -67,6 +71,21 @@ export function ChatHeader({
           </>
         )}
       </div>
+      <div className="flex items-center gap-2">
+      {canRead && (
+        <button
+          onClick={onToggleRead}
+          className={`flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm font-medium ${
+            isReading
+              ? "bg-emerald-900/40 text-emerald-300 border border-emerald-700/60"
+              : "bg-neutral-800 hover:bg-neutral-700 text-neutral-200"
+          }`}
+          title="Read the book pages you have access to"
+        >
+          <BookOpenText size={16} />
+          <span className="hidden sm:inline">{isReading ? "Hide book" : "Read"}</span>
+        </button>
+      )}
       <button
         onClick={onShare}
         className="flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-lg transition-colors text-sm font-medium"
@@ -74,6 +93,7 @@ export function ChatHeader({
         <Share2 size={16} />
         <span className="hidden sm:inline">Share</span>
       </button>
+      </div>
     </header>
   );
 }

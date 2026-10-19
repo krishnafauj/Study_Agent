@@ -29,3 +29,11 @@ export type ChatContextParams = {
   pageStart: string | null;
   pageEnd: string | null;
 };
+
+/** A section the caller may open in the PDF reader. */
+export type ReadableSection = {
+  _id: string;
+  title: string;
+  pageStart: number;
+  pageEnd: number;
+};

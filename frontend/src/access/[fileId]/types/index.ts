@@ -2,7 +2,11 @@
 
 export type ParseStatus = "unparsed" | "parsing" | "parsed" | "failed";
 
-export type Mode = "none" | "assign" | "see";
+/** Stored per-section grant mode. "see" is legacy (topics only, no chat). */
+export type GrantMode = "assign" | "full" | "see";
+
+/** UI mode: "assign" = chat only, "full" = chat + read the PDF pages. */
+export type Mode = "none" | GrantMode;
 
 export type Section = {
   _id: string;
@@ -16,6 +20,6 @@ export type Section = {
   parseError?: string | null;
 };
 
-export type MySection = Section & { mode: "assign" | "see" };
+export type MySection = Section & { mode: GrantMode };
 
-export type GrantByEmail = Record<string, Record<string, "assign" | "see">>;
+export type GrantByEmail = Record<string, Record<string, GrantMode>>;

@@ -14,7 +14,7 @@ export default function AuthLink({ className, children, id }: AuthLinkProps) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setReady(true);
+    setTimeout(() => setReady(true), 0);
   }, []);
 
   const handleClick = () => {

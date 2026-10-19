@@ -31,7 +31,9 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     }
 
     // Finish loading after checks
-    setIsLoading(false);
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 0);
     
   }, [router, pathname]);
 

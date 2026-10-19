@@ -129,7 +129,7 @@ export default function LandingPage() {
           <a href="#how-it-works" className="hover:text-white transition-colors">How it works</a>
         </div>
         <div className="flex items-center gap-3">
-          <AuthLink className="text-sm text-neutral-300 hover:text-white transition-colors px-4 py-2">
+          <AuthLink className="text-sm text-neutral-300 cursor-pointer hover:text-white transition-colors px-4 py-2">
             Sign in
           </AuthLink>
           <AuthLink className="text-sm font-semibold px-5 py-2 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all hover:scale-105 shadow-lg shadow-purple-500/20">
@@ -399,7 +399,7 @@ export default function LandingPage() {
               </span>
             </h2>
             <p className="text-neutral-400 text-lg mb-10 max-w-2xl mx-auto">
-              The AI that knows exactly what's in your syllabus, tracks your weak spots,
+              The AI that knows exactly what&apos;s in your syllabus, tracks your weak spots,
               and helps you prepare smarter — not harder.
             </p>
             <AuthLink

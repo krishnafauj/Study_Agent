@@ -5,7 +5,8 @@
  * scoped chat context. Mounted in Route.js AFTER the global verifyToken.
  *
  *   mode "assign" → section pages are parsed; student can chat about them.
- *   mode "see"    → student can view the section's topics read-only; not parsed.
+ *   mode "full"   → same as assign + the student can read that page range of the PDF.
+ *   mode "see"    → (legacy) student can view the section's topics read-only; not parsed.
  *
  * Assigned-users management (add/revoke emails + assignment email) stays on the
  * existing /files/:id/assign and /files/:id/revoke routes. This router owns the
@@ -23,6 +24,8 @@ import Topic from "../models/topic.js";
 import { buildConceptEdges } from "../services/knowledgeGraphService.js";
 import { getScopedGraphContext } from "../services/scopedRetrievalService.js";
 import { parseSection } from "../services/sectionParseService.js";
+import { getFileBuffer } from "../services/s3Service.js";
+import { PDFDocument } from "pdf-lib";
 
 const router = express.Router();
 
@@ -32,6 +35,9 @@ async function loadFile(fileId) {
   if (!mongoose.isValidObjectId(fileId)) return null;
   return UserFile.findById(fileId).select("_id userId fileName assignedTo s3Key").lean();
 }
+
+const VALID_MODES = new Set(["assign", "see", "full"]);
+const normalizeMode = (m) => (VALID_MODES.has(m) ? m : "assign");
 
 function callerEmail(req) {
   return req.user?.email ? String(req.user.email).toLowerCase() : null;
@@ -52,7 +58,7 @@ function requireOwner(file, req, res) {
 /**
  * Resolve the caller's scope for a file, server-side.
  * Returns { isOwner, sections:[{_id,title,pageStart,pageEnd,mode}], grant }.
- *   - Owner ⇒ every section, mode "assign".
+ *   - Owner ⇒ every section, mode "assign" (owner can always read the PDF).
  *   - Granted user ⇒ only their granted sections, each with its mode.
  */
 async function resolveCallerScope(file, req) {
@@ -90,10 +96,11 @@ async function resolveCallerScope(file, req) {
   };
 }
 
-// Only "assign"-mode sections are parsed into chat.
+// Only chat-enabled ("assign" / "full") sections are parsed into chat.
+const CHAT_MODES = new Set(["assign", "full"]);
 const assignRanges = (sections) =>
   sections
-    .filter((s) => s.mode === "assign")
+    .filter((s) => CHAT_MODES.has(s.mode))
     .map((s) => ({ pageStart: s.pageStart, pageEnd: s.pageEnd }));
 
 // ─────────────────────── overview (owner console) ───────────────────────
@@ -252,7 +259,7 @@ router.post("/access/:fileId/grants", async (req, res) => {
       .filter((s) => s && ownedIds.has(String(s.sectionId)))
       .map((s) => ({
         sectionId: s.sectionId,
-        mode: s.mode === "see" ? "see" : "assign",
+        mode: normalizeMode(s.mode),
       }));
 
     const grant = await SectionGrant.findOneAndUpdate(
@@ -270,6 +277,60 @@ router.post("/access/:fileId/grants", async (req, res) => {
     res.json({ success: true, grant });
   } catch (err) {
     console.error("[access] create grant:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/access/:fileId/grants/bulk — save many users' permissions at once.
+// Body: { grants: [{ email, sections: [{ sectionId, mode }] }] }
+// Each entry REPLACES that user's section list (same semantics as /grants).
+router.post("/access/:fileId/grants/bulk", async (req, res) => {
+  try {
+    const file = await loadFile(req.params.fileId);
+    if (!file) return res.status(404).json({ success: false, error: "File not found" });
+    if (!requireOwner(file, req, res)) return;
+
+    const { grants } = req.body || {};
+    if (!Array.isArray(grants) || !grants.length) {
+      return res.status(400).json({ success: false, error: "grants[] required" });
+    }
+    if (grants.length > 2000) {
+      return res.status(400).json({ success: false, error: "Too many users in one request (max 2000)" });
+    }
+
+    const fileId = String(file._id);
+    const owned = await PermissionSection.find({ fileId }).select("_id").lean();
+    const ownedIds = new Set(owned.map((s) => String(s._id)));
+
+    const ops = [];
+    for (const g of grants) {
+      const email = String(g?.email || "").toLowerCase().trim();
+      if (!email || !Array.isArray(g.sections)) continue;
+      const clean = g.sections
+        .filter((s) => s && ownedIds.has(String(s.sectionId)))
+        .map((s) => ({ sectionId: s.sectionId, mode: normalizeMode(s.mode) }));
+      ops.push({
+        updateOne: {
+          filter: { fileId, grantedToEmail: email },
+          update: {
+            $set: { sections: clean, grantedBy: String(req.user.userId), status: "active" },
+            $setOnInsert: { fileId, grantedToEmail: email },
+          },
+          upsert: true,
+        },
+      });
+    }
+    if (!ops.length) return res.status(400).json({ success: false, error: "No valid grants" });
+
+    const result = await SectionGrant.bulkWrite(ops, { ordered: false });
+    res.json({
+      success: true,
+      saved: ops.length,
+      upserted: result.upsertedCount ?? 0,
+      modified: result.modifiedCount ?? 0,
+    });
+  } catch (err) {
+    console.error("[access] bulk grants:", err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -342,7 +403,63 @@ router.post("/access/:fileId/graph/build", async (req, res) => {
   }
 });
 
-// Scoped chat context — only "assign"-mode sections are parsed.
+// ─────────────────────── section PDF viewer ───────────────────────
+
+// Tiny in-process cache of extracted section PDFs (key: section id + range).
+const sectionPdfCache = new Map();
+const SECTION_PDF_CACHE_MAX = 30;
+
+/**
+ * GET /api/access/:fileId/sections/:sectionId/pdf
+ * Streams a NEW PDF containing only that section's page range. Allowed for the
+ * owner and for users granted the section in "full" mode. The original file /
+ * its S3 URL is never exposed to students.
+ */
+router.get("/access/:fileId/sections/:sectionId/pdf", async (req, res) => {
+  try {
+    const file = await loadFile(req.params.fileId);
+    if (!file) return res.status(404).json({ success: false, error: "File not found" });
+
+    const scope = await resolveCallerScope(file, req);
+    const section = scope.sections.find((s) => String(s._id) === String(req.params.sectionId));
+    if (!section || (!scope.isOwner && section.mode !== "full")) {
+      return res.status(403).json({ success: false, error: "You are not allowed to read these pages" });
+    }
+
+    const cacheKey = `${section._id}:${section.pageStart}-${section.pageEnd}`;
+    let bytes = sectionPdfCache.get(cacheKey);
+    if (!bytes) {
+      const src = await PDFDocument.load(await getFileBuffer(file.s3Key), { ignoreEncryption: true });
+      const total = src.getPageCount();
+      const start = Math.max(1, section.pageStart);
+      const end = Math.min(total, section.pageEnd);
+      if (start > end) return res.status(400).json({ success: false, error: "Section pages are outside the document" });
+
+      const out = await PDFDocument.create();
+      const indices = Array.from({ length: end - start + 1 }, (_, i) => start - 1 + i);
+      const pages = await out.copyPages(src, indices);
+      pages.forEach((p) => out.addPage(p));
+      out.setTitle(`${file.fileName} — ${section.title} (pp. ${start}–${end})`);
+      bytes = Buffer.from(await out.save());
+
+      sectionPdfCache.set(cacheKey, bytes);
+      if (sectionPdfCache.size > SECTION_PDF_CACHE_MAX) {
+        sectionPdfCache.delete(sectionPdfCache.keys().next().value);
+      }
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", bytes.length);
+    res.setHeader("Content-Disposition", `inline; filename="section-${section.pageStart}-${section.pageEnd}.pdf"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.end(bytes);
+  } catch (err) {
+    console.error("[access] section pdf FAILED:", err?.stack || err);
+    res.status(500).json({ success: false, error: `Could not load these pages: ${err?.message || err}` });
+  }
+});
+
+// Scoped chat context — only chat-enabled ("assign" / "full") sections are parsed.
 router.post("/access/:fileId/scoped-context", async (req, res) => {
   try {
     const file = await loadFile(req.params.fileId);

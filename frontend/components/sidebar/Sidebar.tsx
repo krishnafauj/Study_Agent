@@ -1,16 +1,16 @@
 'use client'
 
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, usePathname } from 'next/navigation'
 import { LogOut, Pencil, Trash2, Check, X as XIcon, Sparkles } from 'lucide-react'
 import {
+  Home,
   Plus,
   ChevronLeft,
   Search,
   History,
   FileText,
-  Lightbulb,
   User,
   MessageSquare,
   Menu,
@@ -48,6 +48,7 @@ function authHeaders() {
 export default function Sidebar() {
   const params = useParams()
   const router = useRouter()
+  const pathname = usePathname()
   const activeChatId = params?.id as string | undefined
 
   const [isExpanded, setIsExpanded] = useState(true)
@@ -56,7 +57,7 @@ export default function Sidebar() {
   const [chats, setChats] = useState<ChatSession[]>([])
   const [files, setFiles] = useState<FileRecord[]>([])
   const [isLoadingChats, setIsLoadingChats] = useState(false)
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false)
+  const [, setIsLoadingFiles] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
 
@@ -66,7 +67,7 @@ export default function Sidebar() {
   const renameInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch all chat sessions for the user
-  const fetchChats = async () => {
+  const fetchChats = useCallback(async () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null
     if (!token) return
     setIsLoadingChats(true)
@@ -77,14 +78,14 @@ export default function Sidebar() {
       const data = await res.json()
       if (data.success) setChats(data.chats)
     } catch (err) {
-      console.error('Failed to load chats:', err)
+      console.warn('Failed to load chats:', err)
     } finally {
       setIsLoadingChats(false)
     }
-  }
+  }, [])
 
   // Fetch all files for the user
-  const fetchFiles = async () => {
+  const fetchFiles = useCallback(async () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null
     if (!token) return
     setIsLoadingFiles(true)
@@ -95,11 +96,11 @@ export default function Sidebar() {
       const data = await res.json()
       if (data.files) setFiles(data.files)
     } catch (err) {
-      console.error('Failed to load files:', err)
+      console.warn('Failed to load files:', err)
     } finally {
       setIsLoadingFiles(false)
     }
-  }
+  }, [])
 
   // Stable refs so event listeners always call the latest fetch functions
   const fetchChatsRef = useRef(fetchChats)
@@ -110,13 +111,13 @@ export default function Sidebar() {
   useEffect(() => {
     fetchChats()
     fetchFiles()
-  }, [activeChatId])
+  }, [activeChatId, fetchChats, fetchFiles])
 
   // Listen for optimistic events from the chat page
   useEffect(() => {
     const handleChatOpened = (e: Event) => {
       const detail = (e as CustomEvent).detail as ChatSession & { fileId?: string; fileName?: string }
-      const { chatId, title, fileId, fileName } = detail
+      const { chatId, title, fileId } = detail
 
       setChats(prev => {
         if (prev.some(c => c.chatId === chatId)) return prev
@@ -288,7 +289,7 @@ export default function Sidebar() {
     pageEnd: number
     parseStatus?: 'unparsed' | 'parsing' | 'parsed' | 'failed'
     topicsCreated?: number
-    mode?: 'assign' | 'see'
+    mode?: 'assign' | 'full' | 'see'
   }
   const [sectionModal, setSectionModal] = useState<{ fileId: string; fileName: string } | null>(null)
   const [modalSections, setModalSections] = useState<ModalSection[]>([])
@@ -312,9 +313,9 @@ export default function Sidebar() {
   }
 
   // A section can be chatted with when its pages are parsed (owner) or it was
-  // granted in "assign" mode (invited user).
+  // granted in "assign" / "full" mode (invited user).
   const isSectionChatReady = (s: ModalSection) =>
-    s.mode ? s.mode === 'assign' : s.parseStatus === 'parsed'
+    s.mode ? s.mode === 'assign' || s.mode === 'full' : s.parseStatus === 'parsed'
 
   const startSectionChat = (s: ModalSection) => {
     if (!sectionModal || !isSectionChatReady(s)) return
@@ -330,7 +331,8 @@ export default function Sidebar() {
   }
 
   const menuItems = [
-    { icon: History, label: 'Past Exam History', color: 'text-pink-400', path: '/history' },
+    { icon: Home, label: 'Home', color: 'text-blue-400', path: '/home' },
+    //{ icon: History, label: 'Past Exam History', color: 'text-pink-400', path: '/history' },
     { icon: FileText, label: 'Records', color: 'text-indigo-400', path: '/records' },
     { icon: Sparkles, label: 'AI Suggestions', color: 'text-purple-400', path: '/suggestions' },
     { icon: User, label: 'Profile Settings', color: 'text-emerald-400', path: '/profile' },
@@ -426,23 +428,31 @@ export default function Sidebar() {
 
         {/* MENU ITEMS */}
         <nav className="mt-4 px-3 flex flex-col gap-1">
-          {menuItems.map((item, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                if (item.path) {
-                  router.push(item.path)
-                  setMobileOpen(false)
-                }
-              }}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-900/70 transition-all ${!isExpanded ? 'justify-center' : ''}`}
-            >
-              <item.icon size={20} className={item.color} />
-              <span className={`text-sm transition-all ${isExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'}`}>
-                {item.label}
-              </span>
-            </button>
-          ))}
+          {menuItems.map((item, i) => {
+            const isActive = pathname === item.path
+            return (
+              <button
+                key={i}
+                onClick={() => {
+                  if (item.path) {
+                    router.push(item.path)
+                    setMobileOpen(false)
+                  }
+                }}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
+                  isActive
+                    ? 'bg-neutral-800 text-white font-medium'
+                    : 'text-neutral-400 hover:text-white hover:bg-neutral-900/70'
+                } ${!isExpanded ? 'justify-center' : ''}`}
+                title={!isExpanded ? item.label : undefined}
+              >
+                <item.icon size={20} className={item.color} />
+                <span className={`text-sm transition-all ${isExpanded ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden'}`}>
+                  {item.label}
+                </span>
+              </button>
+            )
+          })}
         </nav>
 
         {/* DIVIDER */}
@@ -561,7 +571,7 @@ export default function Sidebar() {
 
               {/* My Files */}
               {Object.keys(organizedChats.byFileOwner).length > 0 && isExpanded && (
-                <p className="text-xs text-neutral-600 px-3 mt-4 mb-1 uppercase tracking-wider">My Files</p>
+                <p className="text-xs text-neutral-600 px-3 mt-4 mb-1 uppercase tracking-wider">My Classroom</p>
               )}
               {Object.entries(organizedChats.byFileOwner).map(([fileId, fileData]) => {
                 const isExpanding = expandedFiles.has(fileId)
@@ -859,7 +869,7 @@ export default function Sidebar() {
                 {modalSections.map((s) => {
                   const ready = isSectionChatReady(s)
                   const label = s.mode
-                    ? (s.mode === 'assign' ? 'Assigned' : 'View only')
+                    ? (s.mode === 'full' ? 'Chat + read' : s.mode === 'assign' ? 'Assigned' : 'View only')
                     : s.parseStatus === 'parsed'
                       ? (s.topicsCreated ? `${s.topicsCreated} topics` : 'Ready')
                       : s.parseStatus === 'parsing'

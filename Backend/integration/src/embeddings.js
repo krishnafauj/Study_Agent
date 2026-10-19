@@ -5,6 +5,7 @@
 // an Ollama embed model) and set CONFIG.embeddings.provider = "local".
 // ─────────────────────────────────────────────
 import OpenAI from "openai";
+import { observeOpenAI } from "langfuse";
 import { CONFIG } from "./config.js";
 import { logger } from "./logger.js";
 import { withRetry, normalizeText, mapLimit } from "./utils.js";
@@ -12,7 +13,12 @@ import { withRetry, normalizeText, mapLimit } from "./utils.js";
 let _openai = null;
 function openai() {
   if (_openai) return _openai;
-  _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  // Trace embedding calls in Langfuse when keys are configured.
+  _openai =
+    process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY
+      ? observeOpenAI(client, { generationName: "embeddings" })
+      : client;
   return _openai;
 }
 

@@ -1,6 +1,7 @@
 // API calls for the manage-access feature module (uses the shared axios instance).
 
 import api from "@/lib/axios/api";
+import type { GrantMode } from "../types";
 
 export async function getOverview(fileId: string) {
   const res = await api.get(`/api/access/${fileId}/overview`);
@@ -27,7 +28,7 @@ export async function reparseSection(fileId: string, sectionId: string) {
 
 export async function saveGrant(
   fileId: string,
-  body: { email: string; sections: { sectionId: string; mode: "assign" | "see" }[] }
+  body: { email: string; sections: { sectionId: string; mode: GrantMode }[] }
 ) {
   const res = await api.post(`/api/access/${fileId}/grants`, body);
   return res.data;
@@ -51,5 +52,14 @@ export async function assignUser(fileId: string, email: string) {
 
 export async function revokeUser(fileId: string, email: string) {
   const res = await api.post(`/api/files/${fileId}/revoke`, { email });
+  return res.data;
+}
+
+/** Save many users' section permissions in one request. */
+export async function saveGrantsBulk(
+  fileId: string,
+  grants: { email: string; sections: { sectionId: string; mode: GrantMode }[] }[]
+) {
+  const res = await api.post(`/api/access/${fileId}/grants/bulk`, { grants });
   return res.data;
 }

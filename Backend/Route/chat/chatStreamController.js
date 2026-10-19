@@ -17,206 +17,160 @@ import {
   getStructuredContext
 } from "../../services/studyContextService.js";
 
-import { getScopedGraphContext } from "../../services/scopedRetrievalService.js";
-import UserFile from "../../models/userFile.js";
-import SectionGrant from "../../models/sectionGrant.js";
-import PermissionSection from "../../models/permissionSection.js";
+import { lfConfig } from "../../services/langfuse.js";
+import { resolveChatAccess, TIER } from "../../services/accessPolicyService.js";
+import { getTieredContext, getSectionOutlines } from "../../services/tieredRetrievalService.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Build topic-scoped system prompt from direct DB queries
+// Build the system prompt with PROGRESSIVE access (see accessPolicyService.js)
 //
-// `userId` / `userEmail` identify the caller. A non-owner who chats via a
-// SectionGrant is scoped to their approved page ranges (getScopedGraphContext),
-// which may borrow out-of-range prerequisites from the knowledge graph WITHOUT
-// overcrossing. The file owner keeps the original full-file behaviour.
+//   FULL   (assign)  → teach in depth
+//   BRIEF  (see)     → definitions / outline only
+//   LOCKED (none)    → definition-level only, when needed or asked — never a
+//                      flat refusal, never page text
+//   HOME   (chat's own section) → ranked first; "in my home I am king"
+//
+// The owner of a file with no permission sections keeps the original
+// whole-file behaviour.
 // ─────────────────────────────────────────────────────────────────────────────
-async function buildSystemPrompt({ message, fileId, sectionId, conversationSummary, userId, userEmail }) {
 
+async function buildOwnerOverview(fileId, { includeOutline }) {
   let topicsBlock = "";
   let weakBlock = "";
-  let ragBlock = "";
-  let prereqBlock = "";
-
-  if (fileId) {
-
-    // 1. Topic list — scoped to the chat's SECTION when there is one, so the
-    //    model never advertises topics it has no content for. Only when the
-    //    chat is whole-file do we list every topic + performance marks.
-    if (sectionId) {
-      const secTopics = await Topic.find({
-        fileId,
-        sectionId,
-        isChunk: { $ne: true },
-      })
-        .sort({ level: 1, order: 1 })
-        .select("title level")
-        .lean();
-
-      const topicLines = secTopics
-        .filter((t) => (t.level ?? 0) <= 1) // chapters + their topics
+  const ctx = await getFolderContext(fileId);
+  if (ctx && ctx.topics.length > 0) {
+    if (includeOutline) {
+      const topicLines = ctx.topics
+        .filter((t) => t.level === 0)
         .map((t, i) => `${i + 1}. ${t.title}`)
         .join("\n");
-
-      if (topicLines) {
-        topicsBlock = `\n## Topics in this section\n${topicLines}\n`;
-      }
-      console.log(`📚 [Context] Section ${sectionId} | Topics: ${secTopics.length}`);
-    } else {
-      // Whole-file chat: full topic list + performance marks + weak topics.
-      const ctx = await getFolderContext(fileId);
-
-      if (ctx && ctx.topics.length > 0) {
-        const topicLines = ctx.topics
-          .filter((t) => t.level === 0)
-          .map((t, i) => `${i + 1}. ${t.title}`)
-          .join("\n");
-
-        if (topicLines) {
-          topicsBlock = `\n## Topics in Student's Study Material (${ctx.fileName})\n${topicLines}\n`;
-        }
-
-        const attempted = ctx.topics.filter(
-          (t) => t.performanceScore !== null && t.performanceScore !== undefined
-        );
-        if (attempted.length > 0) {
-          const perfLines = attempted
-            .map((t) => `  - ${t.title}: ${Number(t.performanceScore).toFixed(1)}%`)
-            .join("\n");
-          topicsBlock += `\n## Student's Performance\n${perfLines}\n`;
-        }
-
-        console.log(`📚 [Context] File: "${ctx.fileName}" | Topics: ${ctx.totalTopics} | Performance data: ${ctx.hasPerformanceData}`);
-      }
-
-      const { weakTopics, source } = await getWeakTopics(fileId, 70);
-      if (weakTopics.length > 0) {
-        const weakLines = weakTopics
-          .slice(0, 10)
-          .map((t) => {
-            const score = t.performanceScore !== null && t.performanceScore !== undefined
-              ? `${Number(t.performanceScore).toFixed(1)}%`
-              : "not attempted yet";
-            return `  - ${t.topicName} (${score})`;
-          })
-          .join("\n");
-
-        weakBlock = source === "not_attempted"
-          ? `\n## Topics the Student Has Not Studied Yet\n${weakLines}\n`
-          : `\n## Topics Needing Attention (Under 70%)\n${weakLines}\n`;
-      }
+      if (topicLines) topicsBlock = `\n## Topics in Student's Study Material (${ctx.fileName})\n${topicLines}\n`;
     }
-
-    // 3. RAG — scoped to the chat's section (if any), then by ownership/grant.
-    //    ranges === null  → owner, whole file (no section chosen)
-    //    ranges === []    → no access / nothing parsed → no context
-    //    ranges === [..]  → restrict retrieval to those page ranges
-    let chunks = [];
-    let mode = "vector";
-    let ranges = null;
-
-    const file = await UserFile.findById(fileId).select("userId").lean();
-    const isOwner = file && String(file.userId) === String(userId);
-
-    if (file && !isOwner) {
-      // Non-owner: allowed only through an active SectionGrant, scoped to its pages.
-      const email = userEmail ? String(userEmail).toLowerCase() : null;
-      const grant = await SectionGrant.findOne({
-        fileId: String(fileId),
-        status: "active",
-        $or: [
-          ...(email ? [{ grantedToEmail: email }] : []),
-          { grantedToUserId: String(userId) },
-        ],
-      }).lean();
-
-      if (grant) {
-        // Only "assign"-mode sections are chat-enabled; "see" sections are view-only.
-        let assignIds = (grant.sections || [])
-          .filter((s) => s.mode === "assign")
-          .map((s) => String(s.sectionId));
-        // If this chat is bound to one section, narrow to it (must be granted).
-        if (sectionId) assignIds = assignIds.filter((id) => id === String(sectionId));
-        const secs = await PermissionSection.find({ _id: { $in: assignIds } })
-          .select("pageStart pageEnd")
-          .lean();
-        ranges = secs.map((s) => ({ pageStart: s.pageStart, pageEnd: s.pageEnd }));
-      } else {
-        ranges = []; // no grant ⇒ no access
-      }
-    } else if (isOwner && sectionId) {
-      // Owner chatting inside a specific section → scope to that section's pages.
-      const sec = await PermissionSection.findOne({ _id: sectionId, fileId: String(fileId) })
-        .select("pageStart pageEnd")
-        .lean();
-      ranges = sec ? [{ pageStart: sec.pageStart, pageEnd: sec.pageEnd }] : [];
-    }
-    // else: owner, no section → ranges stays null (whole file).
-
-    if (ranges === null) {
-      // Owner, whole file: original structure-aware behaviour.
-      const r = await getStructuredContext(message, fileId, 6);
-      chunks = r.chunks;
-      mode = r.mode;
-    } else if (ranges.length) {
-      const scoped = await getScopedGraphContext(message, fileId, ranges, {
-        limit: 6,
-        prereqCap: 3,
-      });
-      chunks = scoped.primary;
-      mode = `scoped:${scoped.mode}`;
-
-      if (scoped.prerequisites.length > 0) {
-        const pr = scoped.prerequisites
-          .map((p, i) => `[Background ${i + 1}] ${p.title}: ${p.definition}`)
-          .join("\n");
-        // Borrowed from earlier in the book — reference only, clearly separated.
-        prereqBlock =
-          `\n## Background from earlier in the book (reference only — do NOT expand beyond the student's approved sections)\n${pr}\n`;
-      }
-    }
-    // ranges === [] ⇒ chunks stays [] ⇒ existing "no context" rules apply.
-
-    if (chunks.length > 0) {
-      const chunkText = chunks
-        .map((c, i) => {
-          const tags = [c.number, c.contentType, c.pageStart ? `p.${c.pageStart}` : ""]
-            .filter(Boolean)
-            .join(" \u00b7 ");
-          return `[Source ${i + 1}${tags ? " \u00b7 " + tags : ""}] ${c.title}\n${c.content || ""}`;
-        })
-        .join("\n\n");
-      ragBlock = `\n## Relevant Content from Student's Documents\n${chunkText}\n`;
-      console.log(`[RAG] mode=${mode} sources=${chunks.length}`);
+    const attempted = ctx.topics.filter((t) => t.performanceScore !== null && t.performanceScore !== undefined);
+    if (attempted.length > 0) {
+      const perfLines = attempted.map((t) => `  - ${t.title}: ${Number(t.performanceScore).toFixed(1)}%`).join("\n");
+      topicsBlock += `\n## Student's Performance\n${perfLines}\n`;
     }
   }
+  const { weakTopics, source } = await getWeakTopics(fileId, 70);
+  if (weakTopics.length > 0) {
+    const weakLines = weakTopics.slice(0, 10).map((t) => {
+      const score = t.performanceScore !== null && t.performanceScore !== undefined
+        ? `${Number(t.performanceScore).toFixed(1)}%`
+        : "not attempted yet";
+      return `  - ${t.topicName} (${score})`;
+    }).join("\n");
+    weakBlock = source === "not_attempted"
+      ? `\n## Topics the Student Has Not Studied Yet\n${weakLines}\n`
+      : `\n## Topics Needing Attention (Under 70%)\n${weakLines}\n`;
+  }
+  return { topicsBlock, weakBlock };
+}
 
-  // ─── Compose prompt ──────────────────────────────────────────────────────
-  const hasContext = topicsBlock.length > 0;
+function renderChunks(chunks) {
+  return chunks
+    .map((c, i) => {
+      const tags = [c.isHome ? "HOME" : "", c.sectionTitle, c.number, c.contentType, c.pageStart ? `p.${c.pageStart}` : ""]
+        .filter(Boolean)
+        .join(" · ");
+      return `[Source ${i + 1}${tags ? " · " + tags : ""}] ${c.title}\n${c.content || ""}`;
+    })
+    .join("\n\n");
+}
 
-  const rules = hasContext
-    ? `
-## YOUR RULES
-1. You are ONLY allowed to answer questions about the topics listed above from the student's study material.
-2. If asked about something outside these topics, redirect: "That topic isn't in your current study material. Would you like to explore one of your uploaded topics instead?"
-3. When the student asks "what should I study?" or "suggest topics", recommend from the "Topics Needing Attention" section.
-4. Always use the "Relevant Content" section to ground your answers in the actual study material.
-5. If the student asks for the chapter/topic list, reproduce the outline in the "Topics" section above EXACTLY (with its numbers). NEVER invent, guess, or estimate chapters that are not listed.
-6. Be specific, concise, and educationally focused.
-`
-    : `
-## YOUR RULES
-You are a helpful study assistant. Answer the student's questions clearly and concisely.
-`;
-
-  return [
+async function buildSystemPrompt({ message, fileId, access, conversationSummary }) {
+  const header = [
     "You are a personalized AI study assistant.",
     conversationSummary ? `\nConversation so far:\n${conversationSummary}` : "",
-    topicsBlock,
-    weakBlock,
-    ragBlock,
-    prereqBlock,
-    rules,
-  ]
+  ];
+
+  // ── No file context → plain assistant ──────────────────────────────────
+  if (!fileId || !access) {
+    return [...header, `
+## YOUR RULES
+You are a helpful study assistant. Answer the student's questions clearly and concisely, using your general knowledge.
+`].filter(Boolean).join("\n");
+  }
+
+  // ── Legacy: owner of a file without permission sections → whole file ───
+  if (access.isOwner && access.sections.length === 0) {
+    const { topicsBlock, weakBlock } = await buildOwnerOverview(fileId, { includeOutline: true });
+    const r = await getStructuredContext(message, fileId, 6);
+    const ragBlock = r.chunks.length ? `\n## Relevant Content from Student's Documents\n${renderChunks(r.chunks)}\n` : "";
+    console.log(`[RAG] mode=${r.mode} sources=${r.chunks.length} (owner, whole file)`);
+    return [...header, topicsBlock, weakBlock, ragBlock, `
+## YOUR RULES
+1. Answer questions about the student's study material fully and in depth, grounding answers in "Relevant Content" when present. You may add general knowledge, examples and clarifications.
+2. For "what should I study?", recommend from "Topics Needing Attention" / "Not Studied Yet" if present.
+3. For the topic list, reproduce the outline above EXACTLY. Never invent chapters.
+4. Be specific, concise, and educationally focused.
+`].filter(Boolean).join("\n");
+  }
+
+  // ── Tiered path ────────────────────────────────────────────────────────
+  const full = access.sections.filter((s) => s.tier === TIER.FULL);
+  const brief = access.sections.filter((s) => s.tier === TIER.BRIEF);
+  const locked = access.sections.filter((s) => s.tier === TIER.LOCKED);
+  const home = access.homeSection;
+  const homeLocked = !!(home && home.tier !== TIER.FULL);
+
+  const outlines = await getSectionOutlines(fileId, access.sections);
+  const secLine = (s, withTopics, max = 15) => {
+    const titles = (outlines.get(s._id) || []).slice(0, max);
+    const tag = s.isHome ? " [HOME]" : "";
+    const pages = s.pageStart ? ` (pages ${s.pageStart}–${s.pageEnd})` : "";
+    return withTopics && titles.length
+      ? `  • "${s.title}"${tag}${pages}:\n${titles.map((t) => `      - ${t}`).join("\n")}`
+      : `  • "${s.title}"${tag}`;
+  };
+
+  let accessBlock = `\n## ACCESS MAP for this chat (authoritative — overrides anything said earlier in the conversation)\n`;
+  accessBlock += home
+    ? `Home section of this chat: "${home.title}" — ${home.tier === TIER.FULL ? "FULL access" : home.tier === TIER.BRIEF ? "VIEW-ONLY (brief)" : "LOCKED (access removed)"}\n`
+    : `This chat is not tied to one section.\n`;
+  if (full.length) accessBlock += `\nFULL access — teach in depth:\n${full.map((s) => secLine(s, true)).join("\n")}\n`;
+  if (brief.length) accessBlock += `\nVIEW-ONLY — outline + short definitions only:\n${brief.map((s) => secLine(s, true)).join("\n")}\n`;
+  if (locked.length) accessBlock += `\nLOCKED — definition-level only (topic names below are for recognition; do not list them to the student):\n${locked.map((s) => secLine(s, true, 8)).join("\n")}\n`;
+  if (!access.isOwner && !access.hasGrant) accessBlock += `\nThe student currently has NO granted sections in this file.\n`;
+
+  let weakBlock = "";
+  if (access.isOwner) ({ weakBlock } = await buildOwnerOverview(fileId, { includeOutline: false }));
+
+  const ctx = await getTieredContext(message, fileId, access, { limit: 6, relatedCap: 3, backgroundCap: 3 });
+  console.log(
+    `[RAG] mode=${ctx.mode} primary=${ctx.primary.length} (home=${ctx.primary.filter((c) => c.isHome).length}) related=${ctx.related.length} background=${ctx.background.length} | home=${home ? `${home.title}:${home.tier}` : "none"}`
+  );
+
+  const ragBlock = ctx.primary.length
+    ? `\n## Relevant Content (FULL access — ground your answer here; [HOME] = this chat's own section)\n${renderChunks(ctx.primary)}\n`
+    : "";
+  const relatedBlock = ctx.related.length
+    ? `\n## Connected Topics the Student Can Also Access (knowledge graph)\n${ctx.related.map((r) => `- ${r.title} (in "${r.sectionTitle}"): ${r.summary}`).join("\n")}\n`
+    : "";
+  const backgroundBlock = ctx.background.length
+    ? `\n## Brief Background — RESTRICTED concepts (definition level ONLY, never expand)\n${ctx.background
+        .map((b) => `- ${b.title} (in "${b.sectionTitle}", ${b.tier === TIER.BRIEF ? "view-only" : "locked"}${b.reason === "prerequisite" ? ", prerequisite of the current topic" : ", asked by student"}): ${b.definition}`)
+        .join("\n")}\n`
+    : "";
+
+  const rules = [
+    `\n## YOUR RULES`,
+    home && home.tier === TIER.FULL
+      ? `1. HOME FIRST: this chat belongs to "${home.title}". For vague or general requests ("explain this", "what are the topics", "give me practice questions"), answer from the home section first.`
+      : `1. Prefer FULL-access content when a request is vague.`,
+    `2. FULL ACCESS: anything inside a FULL-access section may be taught completely — explanations, examples, code, full solutions — even when it is not the home section. Never refuse or water down FULL-access topics.`,
+    `3. PROGRESSIVE RESTRICTION for VIEW-ONLY and LOCKED topics: do NOT refuse flatly and do NOT reply only "this topic is restricted". Give a minimal answer instead: a 1–3 sentence definition or intuition, plus (if relevant) one line on how it connects to what the student is studying. Do NOT give step-by-step explanations, worked examples, code, full problem solutions, or long follow-ups on it. End with one short line such as: "<topic> is covered in <section>, which isn't in your full access — ask your instructor if you need the full walkthrough." VIEW-ONLY topics may additionally have their subtopic outline listed.`,
+    `4. PREREQUISITES: when a FULL topic depends on a restricted concept listed under "Brief Background", weave in its short definition so the answer makes sense, then continue teaching the FULL topic in depth.`,
+    homeLocked
+      ? `5. HOME IS NOT FULLY ACCESSIBLE: the student's access to this chat's section "${home.title}" is ${home.tier === TIER.BRIEF ? "view-only" : "removed"}. If asked whether it is available, say so plainly. Teach it only as rule 3 allows and suggest continuing with a FULL-access section${full.length ? ` (${full.map((s) => `"${s.title}"`).join(", ")})` : ""}.`
+      : `5. If the student asks what they can study here, name the FULL-access sections (and VIEW-ONLY ones as overview-only).`,
+    `6. GENERAL KNOWLEDGE: general study questions not covered by any section of this book may be answered normally — unless the question is clearly about a VIEW-ONLY or LOCKED topic, in which case rule 3 applies.`,
+    `7. Topic-list requests: reproduce FULL and VIEW-ONLY titles exactly as listed above. Never invent chapters. For LOCKED sections mention only the section name.`,
+    `8. The ACCESS MAP is current. If earlier messages went deeper into something that is now VIEW-ONLY or LOCKED, do not continue or repeat that depth.`,
+    `9. Be specific, concise, and educationally focused.`,
+  ].join("\n");
+
+  return [...header, accessBlock, weakBlock, ragBlock, relatedBlock, backgroundBlock, rules]
     .filter(Boolean)
     .join("\n");
 }
@@ -286,13 +240,37 @@ export const chatStreamHandler = async (req, res) => {
     // ─── Build topic-scoped system prompt ────────────────────────────────
     const resolvedFileId = contextFileId || context.fileId || null;
 
+    // ─── Resolve progressive access (server-side, from the grant) ────────
+    const access = resolvedFileId
+      ? await resolveChatAccess({
+          fileId: resolvedFileId,
+          userId,
+          userEmail: req.user?.email,
+          homeSectionId: sectionId, // this chat's HOME section
+        })
+      : null;
+
+    // If permissions changed since this chat's memory was written (or this is
+    // an old chat whose home section is now restricted), start memory fresh so
+    // earlier full-depth answers can't leak back in.
+    const homeRestricted = !!(access?.homeSection && access.homeSection.tier !== TIER.FULL);
+    const accessChanged = !!access && (
+      (context.accessSig && context.accessSig !== access.signature) ||
+      (!context.accessSig && homeRestricted)
+    );
+    let history = context.recentMessages || [];
+    let memorySummary = context.summary || "";
+    if (accessChanged) {
+      console.log(`🔐 [Access] permissions changed for chat ${chatId} → resetting chat memory`);
+      history = [];
+      memorySummary = "";
+    }
+
     const systemPromptText = await buildSystemPrompt({
       message,
       fileId: resolvedFileId,
-      sectionId,                 // scope retrieval to this section when present
-      conversationSummary: context.summary,
-      userId,                    // caller identity — decides owner vs. scoped path
-      userEmail: req.user?.email, // may be undefined; falls back to grantedToUserId
+      access,
+      conversationSummary: memorySummary,
     });
 
     console.log(`🧠 System prompt built (${systemPromptText.length} chars) | Has context: ${resolvedFileId ? "YES — " + resolvedFileId : "NO"}`);
@@ -300,7 +278,7 @@ export const chatStreamHandler = async (req, res) => {
     // ─── Build LangChain messages ─────────────────────────────────────────
     const messages = [new SystemMessage(systemPromptText)];
 
-    for (const msg of context.recentMessages) {
+    for (const msg of history) {
       messages.push(
         msg.role === "user"
           ? new HumanMessage(msg.content)
@@ -308,6 +286,9 @@ export const chatStreamHandler = async (req, res) => {
       );
     }
     messages.push(new HumanMessage(message));
+
+    // Langfuse: group every LLM call in this request under one chat session.
+    const lf = lfConfig({ userId, sessionId: chatId });
 
     // ─── SSE headers ──────────────────────────────────────────────────────
     res.setHeader("Content-Type", "text/event-stream");
@@ -321,7 +302,7 @@ export const chatStreamHandler = async (req, res) => {
       titlePromise = model.invoke([
         new SystemMessage("You are a helpful assistant. Provide a short, relevant title (3 to 5 words) for a chat that starts with the following message. Respond ONLY with the title text."),
         new HumanMessage(message)
-      ]).then(res => {
+      ], { ...lf, runName: "chat_title" }).then(res => {
         const title = res.content.trim().replace(/^["']|["']$/g, "");
         return title;
       }).catch(err => {
@@ -331,7 +312,7 @@ export const chatStreamHandler = async (req, res) => {
     }
 
     // ─── Stream LLM response ──────────────────────────────────────────────
-    const stream = await model.stream(messages);
+    const stream = await model.stream(messages, { ...lf, runName: "chat_reply" });
     let assistantText = "";
 
     for await (const chunk of stream) {
@@ -382,7 +363,7 @@ If NO knowledge exchange happened (e.g. just asking for explanation, general que
         const scoreResult = await model.invoke([
           new SystemMessage("You are a strict educational evaluator. Return ONLY valid JSON, no markdown."),
           new HumanMessage(scoreDetectionPrompt)
-        ]);
+        ], { ...lf, runName: "score_detection" });
 
         let scoreData = null;
         try {
@@ -482,7 +463,7 @@ If NO knowledge exchange happened (e.g. just asking for explanation, general que
 
     // ─── Update conversation memory ───────────────────────────────────────
     const updatedMessages = [
-      ...context.recentMessages,
+      ...history,
       { role: "user", content: message },
       { role: "assistant", content: assistantText },
     ].slice(-8);
@@ -491,9 +472,9 @@ If NO knowledge exchange happened (e.g. just asking for explanation, general que
     const summaryResult = await model.invoke([
       new SystemMessage("Summarize conversations in 2 concise sentences. Focus on topics discussed and key points made."),
       new HumanMessage(
-        `Previous summary:\n${context.summary || "(none)"}\n\nRecent messages:\n${updatedMessages.map((m) => `${m.role}: ${m.content}`).join("\n")}\n\nUpdated summary:`
+        `Previous summary:\n${memorySummary || "(none)"}\n\nRecent messages:\n${updatedMessages.map((m) => `${m.role}: ${m.content}`).join("\n")}\n\nUpdated summary:`
       ),
-    ]);
+    ], { ...lf, runName: "chat_summary" });
 
     // ─── Save updated context ─────────────────────────────────────────────
     await ChatContext.updateOne(
@@ -502,6 +483,7 @@ If NO knowledge exchange happened (e.g. just asking for explanation, general que
         $set: {
           summary: summaryResult.content,
           recentMessages: updatedMessages,
+          accessSig: access?.signature ?? null,
           updatedAt: new Date(),
         },
       },
