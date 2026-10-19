@@ -22,7 +22,8 @@ app.use(
   cors({
     origin: [
       "http://localhost:3000",
-      "https://agentstudy.vercel.app"
+      "https://agentstudy.vercel.app",
+      "https://studyagent.krishnafauj.in"
     ],
     credentials: true
   })
