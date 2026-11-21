@@ -8,6 +8,7 @@ import {
   ChatsPanel,
   PageSkeleton,
 } from "@/src/dashboard/[fileId]/components";
+import { AssignmentsPanel } from "@/src/viva";
 
 export default function FileDashboardPage() {
   const params = useParams();
@@ -35,18 +36,21 @@ export default function FileDashboardPage() {
               onManage={d.goToAccess}
               onChat={(s) => d.createNewChat(s)}
             />
-            <ChatsPanel
-              chats={d.chats}
-              renamingId={d.renamingId}
-              renameValue={d.renameValue}
-              setRenameValue={d.setRenameValue}
-              onOpen={d.openChat}
-              onStartRename={d.startRename}
-              onSubmitRename={d.submitRename}
-              onCancelRename={d.cancelRename}
-              onDelete={d.removeChat}
-              onCreate={() => d.createNewChat()}
-            />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+              <ChatsPanel
+                chats={d.chats}
+                renamingId={d.renamingId}
+                renameValue={d.renameValue}
+                setRenameValue={d.setRenameValue}
+                onOpen={d.openChat}
+                onStartRename={d.startRename}
+                onSubmitRename={d.submitRename}
+                onCancelRename={d.cancelRename}
+                onDelete={d.removeChat}
+                onCreate={() => d.createNewChat()}
+              />
+              <AssignmentsPanel fileId={fileId} sections={d.sections} />
+            </div>
           </>
         )}
       </main>

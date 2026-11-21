@@ -9,6 +9,7 @@ import connectDB from "./models/MongoConnect.js";
 // Your routes
 import apiRoutes from "./Route/Route.js";
 import internalMcpRoutes from "./Route/internalMcpRoutes.js";
+import { attachLiveViva } from "./evaluation/liveViva.js";
 
 // MCP client imports
 // import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -98,11 +99,13 @@ async function startServer() {
 
     console.log("MongoDB connected");
 
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
 
       console.log(`Server running on port ${PORT}`);
 
     });
+
+    attachLiveViva(server); // real-time voice viva at /ws/viva
 
   } catch (err) {
 

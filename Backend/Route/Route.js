@@ -19,6 +19,8 @@ import suggestionRoutes from "./suggestionRoutes.js";
 import recordsRoutes from "./recordsRoutes.js";
 import accessRoutes from "./accessRoutes.js";
 import groupRoutes from "./groupRoutes.js";
+import evaluationRoutes from "../evaluation/evaluationRoutes.js";
+import assignmentRoutes from "../evaluation/assignmentRoutes.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 console.log("Route loaded");
 router.use("/auth", authRoutes);
@@ -43,6 +45,10 @@ router.use(accessRoutes);
 
 // Student groups (reusable student lists)
 router.use(groupRoutes);
+
+// Voice viva / AI evaluation (Deepgram STT+TTS, gpt-4o-mini grader)
+router.use(assignmentRoutes);
+router.use(evaluationRoutes);
 
 // Chat streaming
 router.post("/chat-stream", chatStreamHandler);
